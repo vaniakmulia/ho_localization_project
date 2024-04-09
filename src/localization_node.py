@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
+'''
+    Node to perform localization using EKF.
+'''
+
 import rospy
-from turtlesim.msg import Pose
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist
+# from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState, Imu
-from std_msgs.msg import Float64MultiArray
-from tf2_msgs.msg import TFMessage
 import tf
-from math import sin,cos
 import time
 
 from filter import *
@@ -38,6 +38,10 @@ class TurtlebotLocalization:
         # flag attribute to indicate start of localization
         self.start = False
 
+        # encoder timestamp
+        self.left_wheel_time = time.time()
+        self.right_wheel_time = time.time()
+
         # flag attribute to indicate left and right wheel encoder reading available
         self.right_wheel_flag = False
         self.left_wheel_flag = False
@@ -52,12 +56,12 @@ class TurtlebotLocalization:
         # add more attributes later
 
         # Subscribers
-        self.states_sub = rospy.Subscriber("/turtlebot/joint_states",JointState,self.encoder_callback)
+        self.encoder_sub = rospy.Subscriber("/turtlebot/joint_states",JointState,self.encoder_callback)
         self.imu_sub = rospy.Subscriber("/turtlebot/kobuki/sensors/imu_data",Imu,self.imu_callback)
 
         # Publishers
         self.odom_pub = rospy.Publisher("/odom",Odometry, queue_size=1)
-        self.vel_pub = rospy.Publisher("/turtlebot/kobuki/commands/wheel_velocities",Float64MultiArray, queue_size=1)
+        # self.vel_pub = rospy.Publisher("/turtlebot/kobuki/commands/wheel_velocities",Float64MultiArray, queue_size=1)
 
         # Timer
         self.timer = rospy.Timer(rospy.Duration(0.1), self.send_messages)
@@ -67,24 +71,25 @@ class TurtlebotLocalization:
     def encoder_callback(self,states_msg):
         if self.start:
             # assign the wheel encoder values
-            if states_msg.name == "turtlebot/kobuki/wheel_right_joint":
-                self.wr = states_msg.velocity
-                self.right_wheel_cov = 0.05 # where/how to get this?
+            if states_msg.name[0] == "turtlebot/kobuki/wheel_right_joint":
+                self.wr = states_msg.velocity[0]
+                self.right_wheel_cov = np.deg2rad(3) #guess
                 self.right_wheel_flag = True
                 self.right_wheel_prev_time = self.right_wheel_time
                 self.right_wheel_time = time.time()
-            elif states_msg.name == "turtlebot/kobuki/wheel_left_joint":
-                self.wl = states_msg.velocity
-                self.left_wheel_cov = 0.05 # where/how to get this?
+            elif states_msg.name[0] == "turtlebot/kobuki/wheel_left_joint":
+                self.wl = states_msg.velocity[0]
+                self.left_wheel_cov = np.deg2rad(3) #guess
                 self.left_wheel_flag = True
                 self.left_wheel_prev_time = self.left_wheel_time
                 self.left_wheel_time = time.time()
             
             if self.right_wheel_flag and self.left_wheel_flag:
                 # pre-processing for Prediction
+                rospy.loginfo("Performing prediction.")
                 xk_1 = np.array([self.x,self.y,self.yaw]).reshape(3,1)
                 Pk_1 = self.Pk
-                self.Re = np.diag(self.left_wheel_cov,self.right_wheel_cov)
+                self.Re = np.diag([self.left_wheel_cov,self.right_wheel_cov])
 
                 uk,Qk = self.encoder_to_displacement(self.wl,self.wr,self.Re)
                 xk_bar,Pk_bar = self.filter.Prediction(xk_1,Pk_1,uk,Qk)
@@ -108,20 +113,23 @@ class TurtlebotLocalization:
                                                             imu_msg.orientation.y,
                                                             imu_msg.orientation.z,
                                                             imu_msg.orientation.w])
-        zk = np.array([[yaw]])
-        Rk = np.array([[imu_msg.orientation_covariance[8]]])
-        Hk = np.array([[0,0,1]])
-        Vk = np.eye(1)
+        
+        if self.start:
+            rospy.loginfo("Updating with IMU.")
+            zk = np.array([[yaw]])
+            Rk = np.array([[imu_msg.orientation_covariance[8]]])
+            Hk = np.array([[0,0,1]])
+            Vk = np.eye(1)
 
-        xk_bar = np.array([self.x,self.y,self.yaw]).reshape(3,1)
-        Pk_bar = self.Pk
+            xk_bar = np.array([self.x,self.y,self.yaw]).reshape(3,1)
+            Pk_bar = self.Pk
 
-        xk,Pk = self.filter.Update(xk_bar,Pk_bar,zk,Rk,Hk,Vk)
+            xk,Pk = self.filter.Update(xk_bar,Pk_bar,zk,Rk,Hk,Vk)
 
-        self.x = xk[0,0]
-        self.y = xk[1,0]
-        self.yaw = xk[2,0]
-        self.Pk = Pk
+            self.x = xk[0,0]
+            self.y = xk[1,0]
+            self.yaw = xk[2,0]
+            self.Pk = Pk
     
     def encoder_to_displacement(self,wl,wr,Re):
         # set time interval
@@ -157,6 +165,7 @@ class TurtlebotLocalization:
         return uk,Qk
     
     def send_messages(self,event):
+        rospy.loginfo("Publishing odometry.")
         # publish Odometry
         self.send_odom()
         # publish tf
