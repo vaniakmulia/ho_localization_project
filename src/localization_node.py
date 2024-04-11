@@ -61,7 +61,6 @@ class TurtlebotLocalization:
 
         # Publishers
         self.odom_pub = rospy.Publisher("/odom",Odometry, queue_size=1)
-        # self.vel_pub = rospy.Publisher("/turtlebot/kobuki/commands/wheel_velocities",Float64MultiArray, queue_size=1)
 
         # Timer
         self.timer = rospy.Timer(rospy.Duration(0.1), self.send_messages)
@@ -152,12 +151,12 @@ class TurtlebotLocalization:
 
         # linear and angular displacement of robot
         d = (dl+dr)/2
-        dtheta = (dr-dl)/self.wheelbase
+        dtheta = (dl-dr)/self.wheelbase
         uk = np.array([d,0,dtheta]).reshape(3,1)
 
         # converting covariance from pulses to displacement
         # A matrix in the magic table entry
-        A = np.array([[0.5,0.5],[0,0],[-1/self.wheelbase, 1/self.wheelbase]])
+        A = np.array([[0.5,0.5],[0,0],[1/self.wheelbase, -1/self.wheelbase]])
         A = A @ np.diag([dt,dt]) @ np.diag([self.wheel_radius,self.wheel_radius]) 
 
         Qk = A @ Re @ A.T

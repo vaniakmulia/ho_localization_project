@@ -19,8 +19,8 @@ class Controller:
         self.w = 0
 
         # initialize wheel velocities
-        self.vl = 0 # left wheel
-        self.vr = 0 # right wheel
+        self.wl = 0 # left wheel
+        self.wr = 0 # right wheel
 
         # robot properties
         self.wheel_radius = 0.035 #m
@@ -37,13 +37,13 @@ class Controller:
         self.v = twist_msg.linear.x
         self.w = twist_msg.angular.z
         
-        # convert to wheel velocities
-        self.vr = self.v + (self.w * self.wheelbase)/2
-        self.vl = self.v - (self.w * self.wheelbase)/2
+        # convert to wheel angular velocities
+        self.wr = (self.v + (self.w * self.wheelbase)/2)/self.wheel_radius
+        self.wl = (self.v - (self.w * self.wheelbase)/2)/self.wheel_radius
 
         # create wheel velocity message
         wheel_msg = Float64MultiArray()
-        wheel_msg.data = [self.vl,self.vr]
+        wheel_msg.data = [self.wl,self.wr]
         
         # publish wheel velocities
         self.wheel_vel_pub.publish(wheel_msg)
