@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>turtlebot_localization</name>
+  <name>ho_localization_project</name>
   <version>0.0.0</version>
-  <description>The turtlebot_localization package</description>
+  <description>The ho_localization_project package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->
