@@ -83,7 +83,7 @@ class TurtlebotLocalization:
             
             if self.right_wheel_flag and self.left_wheel_flag:
                 # Pre-processing for Prediction
-                rospy.loginfo("Performing prediction.")
+                # rospy.loginfo("Performing prediction.")
                 xk_1 = np.array([self.x,self.y,self.yaw]).reshape(3,1)
                 Pk_1 = self.Pk
                 self.Re = np.diag([self.left_wheel_cov,self.right_wheel_cov])
@@ -117,7 +117,7 @@ class TurtlebotLocalization:
             self.start = True # start the localization
         else:
             # Pre-processing for Update
-            rospy.loginfo("Updating with IMU.")
+            # rospy.loginfo("Updating with IMU.")
             zk = np.array([[yaw]])
             Rk = np.array([[imu_msg.orientation_covariance[8]]])
             Hk = np.array([[0,0,1]])
@@ -169,7 +169,7 @@ class TurtlebotLocalization:
         return uk,Qk
     
     def send_messages(self,event):
-        rospy.loginfo("Publishing odometry.")
+        # rospy.loginfo("Publishing odometry.")
         # publish Odometry
         self.send_odom()
         # publish tf
