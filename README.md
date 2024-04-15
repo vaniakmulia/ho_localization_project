@@ -10,6 +10,8 @@ To run the package with Stonefish simulator, first run the simulator:
 roslaunch turtlebot_simulation turtlebot_basic.launch 
 ```
 
+> NOTE: You can also run other launch files in the `turtlebot_simulation` package to launch a different environment.
+
 Then, there are several options:
 
 To run only the localization node, run this command in another terminal:
@@ -24,7 +26,7 @@ And to test the localization, you can publish wheel velocities to the ROS topic 
 rosrun turtlebot_localization controller_node.py
 ```
 
-This node allows for controlling the turtlebot using `Twist` message, and thus the robot can be controlled by teleop or with graphical tools such as `rqt_robot_steering` (NOTE: `rqt_robot_steering` is still not tested yet).
+This node allows for controlling the turtlebot using `Twist` message, and thus the robot can be controlled by teleop or with graphical tools such as _rqt_robot_steering_.
 
 Alternatively, to run the localization node and controller node together, you can run the launch file included in this package. To do so, run the following command in another terminal:
 
@@ -32,6 +34,22 @@ Alternatively, to run the localization node and controller node together, you ca
 roslaunch turtlebot_localization localization_controller.launch
 ```
 
+## Extra: Teleop
+
+A nice teleop interface can be launched by typing this command line in the terminal:
+
+```bash
+rosrun teleop_twist_keyboard teleop_twist_keyboard.py 
+```
+
+To run this, you need to have `teleop_twist_keyboard` installed. To install it, simply run
+
+```bash
+sudo apt-get install ros-noetic-teleop-twist-keyboard
+```
+
+For more information, refer to this [link](https://wiki.ros.org/teleop_twist_keyboard).
+
 <sup>
-Last updated by Vania - 09/04/2024
+Last updated by Vania - 15/04/2024
 </sup>

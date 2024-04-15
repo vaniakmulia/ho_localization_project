@@ -53,8 +53,6 @@ class TurtlebotLocalization:
         # instantiate filter
         self.filter = EKF(np.array([self.x,self.y,self.yaw]).reshape(3,1),self.Pk)
 
-        # add more attributes later
-
         # Subscribers
         self.encoder_sub = rospy.Subscriber("/turtlebot/joint_states",JointState,self.encoder_callback)
         self.imu_sub = rospy.Subscriber("/turtlebot/kobuki/sensors/imu_data",Imu,self.imu_callback)
@@ -84,36 +82,41 @@ class TurtlebotLocalization:
                 self.left_wheel_time = time.time()
             
             if self.right_wheel_flag and self.left_wheel_flag:
-                # pre-processing for Prediction
+                # Pre-processing for Prediction
                 rospy.loginfo("Performing prediction.")
                 xk_1 = np.array([self.x,self.y,self.yaw]).reshape(3,1)
                 Pk_1 = self.Pk
                 self.Re = np.diag([self.left_wheel_cov,self.right_wheel_cov])
 
+                # Convert encoder reading to odometry displacement
                 uk,Qk = self.encoder_to_displacement(self.wl,self.wr,self.Re)
+
+                # Perform Prediction
                 xk_bar,Pk_bar = self.filter.Prediction(xk_1,Pk_1,uk,Qk)
 
+                # Save Prediction result
                 self.x = xk_bar[0,0]
                 self.y = xk_bar[1,0]
                 self.yaw = xk_bar[2,0]
                 self.Pk = Pk_bar
 
-                # reset the flags
+                # Reset the flags
                 self.right_wheel_flag = False
                 self.left_wheel_flag = False
 
-    def imu_callback(self,imu_msg):
-        # start the localization when the node receives the first IMU reading
-        if not self.start:
-            self.start = True # start the localization
-        
-        # update the yaw from the magnetometer
+    def imu_callback(self,imu_msg):        
+        # Get the yaw reading from the magnetometer
         _,_,yaw = tf.transformations.euler_from_quaternion([imu_msg.orientation.x, 
                                                             imu_msg.orientation.y,
                                                             imu_msg.orientation.z,
                                                             imu_msg.orientation.w])
         
-        if self.start:
+        # Start the localization when the node receives the first IMU reading
+        if not self.start:
+            self.yaw = yaw # store the first IMU yaw reading as the initial yaw value
+            self.start = True # start the localization
+        else:
+            # Pre-processing for Update
             rospy.loginfo("Updating with IMU.")
             zk = np.array([[yaw]])
             Rk = np.array([[imu_msg.orientation_covariance[8]]])
@@ -123,8 +126,10 @@ class TurtlebotLocalization:
             xk_bar = np.array([self.x,self.y,self.yaw]).reshape(3,1)
             Pk_bar = self.Pk
 
+            # Perform Update
             xk,Pk = self.filter.Update(xk_bar,Pk_bar,zk,Rk,Hk,Vk)
 
+            # Save Update results
             self.x = xk[0,0]
             self.y = xk[1,0]
             self.yaw = xk[2,0]
