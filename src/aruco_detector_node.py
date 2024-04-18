@@ -17,6 +17,8 @@ from sensor_msgs.msg import Image, CameraInfo
 from visualization_msgs.msg import MarkerArray
 from std_msgs.msg import Float64MultiArray
 
+from ho_custom_msgs.msg import ArucoRange # a newly created ROS msg
+
 class ArUcoDetector:
     def __init__(self) -> None:
         self.image = np.zeros((1,1))
@@ -36,7 +38,7 @@ class ArUcoDetector:
 
         # Publishers
         self.marker_pub = rospy.Publisher("~aruco_marker", MarkerArray, queue_size=1)
-        self.range_pub = rospy.Publisher("/aruco_range",Float64MultiArray, queue_size=1)
+        self.range_pub = rospy.Publisher("/aruco_range",ArucoRange, queue_size=1)
 
         # Timer
         self.timer = rospy.Timer(rospy.Duration(0.5), self.send_messages)
@@ -74,7 +76,7 @@ class ArUcoDetector:
         # Loop for all detected markers
         for i in range(len(marker_ids)):
             # Estimate the pose of the marker
-            _, rvec, tvec = cv2.solvePnP(object_points, marker_corners[i], self.camera_intrinsics, self.camera_distortions)
+            _, _, tvec = cv2.solvePnP(object_points, marker_corners[i], self.camera_intrinsics, self.camera_distortions)
 
             # print("id =", marker_ids[i])
             # print("tvec = ",tvec)
@@ -94,14 +96,15 @@ class ArUcoDetector:
 
     def send_messages(self,event):
         # Send the list of ArUco range
-        range_msg = Float64MultiArray()
-        range_msg.data = self.aruco_range_list
+        range_msg = ArucoRange()
+        range_msg.id = list(self.marker_ids.flatten())
+        range_msg.range = self.aruco_range_list
 
         self.range_pub.publish(range_msg)
 
 
 if __name__=='__main__':
-    rospy.init_node('aruco_pose_to_range', anonymous=True) # initialize the node
+    rospy.init_node('aruco_pose_to_range', anonymous=False) # initialize the node
     node = ArUcoDetector()
 
     rospy.spin()
