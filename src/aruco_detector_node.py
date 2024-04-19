@@ -41,7 +41,7 @@ class ArUcoDetector:
         self.range_pub = rospy.Publisher("/aruco_range",ArucoRange, queue_size=1)
 
         # Timer
-        self.timer = rospy.Timer(rospy.Duration(0.5), self.send_messages)
+        self.timer = rospy.Timer(rospy.Duration(2), self.send_messages)
 
     def image_callback(self,image_msg):
         # Convert Image message into image
@@ -51,7 +51,7 @@ class ArUcoDetector:
 
         marker_corners, self.marker_ids = self.detect_aruco()
 
-        if len(self.marker_ids) > 0:
+        if self.marker_ids is not None:
             self.aruco_range_list = self.estimate_aruco_range(marker_corners, self.marker_ids)
 
     def detect_aruco(self):
@@ -95,12 +95,13 @@ class ArUcoDetector:
             self.camera_distortions = np.array(intrinsics_msg.D)
 
     def send_messages(self,event):
-        # Send the list of ArUco range
-        range_msg = ArucoRange()
-        range_msg.id = list(self.marker_ids.flatten())
-        range_msg.range = self.aruco_range_list
+        if self.marker_ids is not None:
+            # Send the list of ArUco range
+            range_msg = ArucoRange()
+            range_msg.id = list(self.marker_ids.flatten())
+            range_msg.range = self.aruco_range_list
 
-        self.range_pub.publish(range_msg)
+            self.range_pub.publish(range_msg)
 
 
 if __name__=='__main__':
