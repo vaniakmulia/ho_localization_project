@@ -146,8 +146,12 @@ class TurtlebotLocalization:
             self.Pk = Pk
 
     def feature_callback(self,range_msg):
+        print("Range msg = ",range_msg)
         marker_id = list(range_msg.id)
         marker_range = list(range_msg.range)
+
+        print("Marker id = ", marker_id)
+        print("Marker range = ", marker_range)
 
         for n in range(len(marker_id)):
             id = marker_id[n]
@@ -160,14 +164,20 @@ class TurtlebotLocalization:
                 else:
                     self.feature_observation_ranges[id].append(marker_range[n])
                     self.feature_observation_points[id].append((self.x,self.y))
+
+        print("Feature observation ranges = ", self.feature_observation_ranges)
+        print("Feature observation points = ", self.feature_observation_points)
         
         # Perform trilateration
-        for id in self.feature_observation_ranges.keys():
+        feature_observation_ranges_copy = self.feature_observation_ranges.copy() # to avoid changing length of dict in iteration
+        for id in feature_observation_ranges_copy.keys():
             # check if the marker already has 3 observations
             if len(self.feature_observation_ranges[id]) == 3:
+                print(f"Perform trilateration on feature {id}.")
                 xf,yf = self.trilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
                 # if trilateration succeeds, add the feature to the states
                 if xf and yf:
+                    print("Trilateration succeed.")
                     self.feature_states.append([xf,yf])
                     self.feature_states_id.append(id)
                     
@@ -176,6 +186,7 @@ class TurtlebotLocalization:
                     del self.feature_observation_points[id]
 
                 else: # if trilateration fails
+                    print("Trilateration failed.")
                     # remove the first observation, and let the robot makes a new observation later
                     self.feature_observation_ranges[id].pop(0)
                     self.feature_observation_points[id].pop(0)

@@ -1,4 +1,4 @@
 <launch>
-    <node pkg="turtlebot_localization" type="localization_node.py" name="turtlebot_localization" output="screen" />
-    <node pkg="turtlebot_localization" type="controller_node.py" name="twist_to_wheel_vel" output="screen" />
+    <node pkg="ho_localization_project" type="localization_node.py" name="turtlebot_localization" output="screen" />
+    <node pkg="ho_localization_project" type="controller_node.py" name="twist_to_wheel_vel" output="screen" />
 </launch>
