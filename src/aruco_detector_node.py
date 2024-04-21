@@ -14,8 +14,6 @@ import numpy as np
 from cv_bridge import CvBridge
 import cv2
 from sensor_msgs.msg import Image, CameraInfo
-from visualization_msgs.msg import MarkerArray
-from std_msgs.msg import Float64MultiArray
 
 from ho_custom_msgs.msg import ArucoRange # a newly created ROS msg
 
@@ -37,7 +35,6 @@ class ArUcoDetector:
         self.intrinsics_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/camera_info", CameraInfo, self.intrinsics_callback)
 
         # Publishers
-        self.marker_pub = rospy.Publisher("~aruco_marker", MarkerArray, queue_size=1)
         self.range_pub = rospy.Publisher("/aruco_range",ArucoRange, queue_size=1)
 
         # Timer

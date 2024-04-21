@@ -6,8 +6,9 @@
 
 import rospy
 from nav_msgs.msg import Odometry
-# from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState, Imu
+import tf.transformations
+from visualization_msgs.msg import Marker,MarkerArray
 import tf
 import time
 
@@ -69,6 +70,7 @@ class TurtlebotLocalization:
 
         # Publishers
         self.odom_pub = rospy.Publisher("/odom",Odometry, queue_size=1)
+        self.marker_pub = rospy.Publisher("~aruco_marker", MarkerArray, queue_size=1)
 
         # Timer
         self.timer = rospy.Timer(rospy.Duration(0.1), self.send_messages)
@@ -157,13 +159,22 @@ class TurtlebotLocalization:
             id = marker_id[n]
             # only add features to the states if it still doesn't exist in the states
             if id not in self.feature_states_id:
+                # get observation point = tf from world_ned to camera_color_frame
+                # obtained from pose compounding of odom \oplus (base_footprint to camera)
+                listener = tf.TransformListener()
+                (trans,rot) = listener.lookupTransform('turtlebot/kobuki/base_footprint', 'camera_color_frame', rospy.Time(0))
+                _,_,angle = tf.transformations.euler_from_quaternion(rot)
+                world_to_base = np.array([self.x,self.y,self.yaw]).reshape((3,1))
+                base_to_cam = np.array([trans[0],trans[1],angle]).reshape((3,1))
+                obs_point = Pose3D(world_to_base).oplus(base_to_cam)
+                
                 # store the ranges and observation points for trilateration
                 if id not in self.feature_observation_ranges.keys(): # marker ID observed for the first time
                     self.feature_observation_ranges[id] = [marker_range[n]]
-                    self.feature_observation_points[id] = [(self.x,self.y)]
+                    self.feature_observation_points[id] = [(obs_point[0,0],obs_point[1,0])]
                 else:
                     self.feature_observation_ranges[id].append(marker_range[n])
-                    self.feature_observation_points[id].append((self.x,self.y))
+                    self.feature_observation_points[id].append((obs_point[0,0],obs_point[1,0]))
 
         print("Feature observation ranges = ", self.feature_observation_ranges)
         print("Feature observation points = ", self.feature_observation_points)
@@ -243,6 +254,9 @@ class TurtlebotLocalization:
                         rospy.Time.now(),
                         "turtlebot/kobuki/base_footprint",
                         "world_ned")
+        
+        # publish feature visualization
+        self.send_feature()
 
     def send_odom(self):
         # publish Odometry message
@@ -274,13 +288,25 @@ class TurtlebotLocalization:
         self.odom_pub.publish(odom_msg)
 
     def trilateration(self,observation_ranges,observation_points):
+        # don't perform trilateration if the distance between observation points is less than a threshold
+        dist_threshold = 0.2
+        dist1 = np.linalg.norm(np.subtract(observation_points[0],observation_points[1]))
+        dist2 = np.linalg.norm(np.subtract(observation_points[1],observation_points[2]))
+        if (dist1 < dist_threshold) or (dist2 < dist_threshold):
+            return None, None
+
         # extract coordinates of observation points
         x1, y1 = observation_points[0]
         x2, y2 = observation_points[1]
         x3, y3 = observation_points[2]
 
+        print("x1 = ", x1)
+        print("y1 = ", y1)
+
         # Extract distances
         d1, d2, d3 = observation_ranges
+
+        print("d1 = ", d1)
         
         # Calculate coefficients for linear system
         A = 2 * np.array([
@@ -293,6 +319,9 @@ class TurtlebotLocalization:
             (d2 ** 2 - d3 ** 2 + x3 ** 2 - x2 ** 2 + y3 ** 2 - y2 ** 2)
         ])
         
+        print("A = ", A)
+        print("b = ", b)
+
         # Solve linear system
         try:
             xf, yf = np.linalg.solve(A, b)
@@ -300,6 +329,39 @@ class TurtlebotLocalization:
         except np.linalg.LinAlgError:
             # If the linear system is singular (points are collinear), return None
             return None, None
+        
+    def send_feature(self):
+        markers_list = []
+        # create Marker message for each feature in state
+        for feature in range(len(self.feature_states_id)):
+            m = Marker()
+            m.header.frame_id = "world_ned"
+            m.header.stamp = rospy.Time.now()
+            m.ns = "feature"
+            m.id = self.feature_states_id[feature]
+            m.type = Marker.SPHERE
+            m.action = Marker.ADD
+
+            m.pose.position.x = self.feature_states[feature][0]
+            m.pose.position.y = self.feature_states[feature][1]
+            m.pose.position.z = 0.0
+
+            m.scale.x = 0.1
+            m.scale.y = 0.1
+            m.scale.z = 0.1
+
+            m.color.a = 1.0
+            m.color.r = 0.0
+            m.color.g = 0.0
+            m.color.b = 1.0
+
+            markers_list.append(m)
+
+        # publish MarkerArray
+        marker_msg = MarkerArray()
+        marker_msg.markers = markers_list
+        self.marker_pub.publish(marker_msg)
+
 
 
 
