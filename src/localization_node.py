@@ -13,7 +13,7 @@ import tf
 import time
 
 from filter import *
-from ho_custom_msgs.msg import ArucoRange # a newly created ROS msg
+from ho_localization_project.msg import ArucoRange # a newly created ROS msg
 
 class TurtlebotLocalization:
     def __init__(self) -> None:
