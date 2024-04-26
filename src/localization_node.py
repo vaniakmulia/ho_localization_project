@@ -15,6 +15,8 @@ import time
 from filter import *
 from ho_localization_project.msg import ArucoRange # a newly created ROS msg
 
+from geometry_msgs.msg import PointStamped
+
 class TurtlebotLocalization:
     def __init__(self) -> None:
         # initialize robot pose
@@ -60,6 +62,9 @@ class TurtlebotLocalization:
         self.feature_observation_ranges = {} # dict of ranges for trilateration
         self.feature_observation_points = {} # dict of observation points for trilateration
 
+        # transformation from base_footprint to camera frame (for trilateration)
+        self.base_to_cam = np.zeros((3,1))
+
         # instantiate filter
         self.filter = EKF(np.array([self.x,self.y,self.yaw]).reshape(3,1),self.Pk)
 
@@ -71,6 +76,10 @@ class TurtlebotLocalization:
         # Publishers
         self.odom_pub = rospy.Publisher("/odom",Odometry, queue_size=1)
         self.marker_pub = rospy.Publisher("~aruco_marker", MarkerArray, queue_size=1)
+
+        self.obs_point_pub = rospy.Publisher("/obs_point_vis", PointStamped, queue_size=1)
+        self.aruco_ranges_pub = rospy.Publisher("/aruco_range_vis", MarkerArray, queue_size=1)
+        self.trilateration_pub = rospy.Publisher("/trilateration_vis", MarkerArray, queue_size=1)
 
         # Timer
         self.timer = rospy.Timer(rospy.Duration(0.1), self.send_messages)
@@ -148,9 +157,27 @@ class TurtlebotLocalization:
             self.Pk = Pk
 
     def feature_callback(self,range_msg):
+        # obtain tf from base_footprint to camera frame
+        if not self.base_to_cam.any():
+            try:
+                listener = tf.TransformListener()
+                (trans,rot) = listener.lookupTransform('turtlebot/kobuki/base_footprint', 'camera_color_frame', rospy.Time(0))
+                _,_,angle = tf.transformations.euler_from_quaternion(rot)
+                self.base_to_cam = np.array([trans[0],trans[1],angle]).reshape((3,1))
+            except:
+                pass
+        
+        # get observation point = tf from world_ned to camera_color_frame
+        # obtained from pose compounding of odom \oplus (base_footprint to camera)
+        world_to_base = np.array([self.x,self.y,self.yaw]).reshape((3,1))
+        obs_point = Pose3D(world_to_base).oplus(self.base_to_cam)
+
         print("Range msg = ",range_msg)
         marker_id = list(range_msg.id)
         marker_range = list(range_msg.range)
+
+        # Debugging: publish Aruco ranges to Rviz
+        self.publish_aruco_ranges_vis(marker_range,obs_point)
 
         print("Marker id = ", marker_id)
         print("Marker range = ", marker_range)
@@ -159,14 +186,9 @@ class TurtlebotLocalization:
             id = marker_id[n]
             # only add features to the states if it still doesn't exist in the states
             if id not in self.feature_states_id:
-                # get observation point = tf from world_ned to camera_color_frame
-                # obtained from pose compounding of odom \oplus (base_footprint to camera)
-                listener = tf.TransformListener()
-                (trans,rot) = listener.lookupTransform('turtlebot/kobuki/base_footprint', 'camera_color_frame', rospy.Time(0))
-                _,_,angle = tf.transformations.euler_from_quaternion(rot)
-                world_to_base = np.array([self.x,self.y,self.yaw]).reshape((3,1))
-                base_to_cam = np.array([trans[0],trans[1],angle]).reshape((3,1))
-                obs_point = Pose3D(world_to_base).oplus(base_to_cam)
+                              
+                # Debugging: publish obs_point to Rviz
+                self.publish_obs_point(obs_point)
                 
                 # store the ranges and observation points for trilateration
                 if id not in self.feature_observation_ranges.keys(): # marker ID observed for the first time
@@ -188,6 +210,8 @@ class TurtlebotLocalization:
                 xf,yf = self.trilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
                 # if trilateration succeeds, add the feature to the states
                 if xf and yf:
+                    # Debugging: visualize the 3 ranges in Rviz
+                    self.publish_trilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id])
                     print("Trilateration succeed.")
                     self.feature_states.append([xf,yf])
                     self.feature_states_id.append(id)
@@ -322,9 +346,9 @@ class TurtlebotLocalization:
         print("A = ", A)
         print("b = ", b)
 
-        # Solve linear system
+        # Solve linear system with least-squares
         try:
-            xf, yf = np.linalg.solve(A, b)
+            xf, yf = np.linalg.lstsq(A, b)[0]
             return xf, yf
         except np.linalg.LinAlgError:
             # If the linear system is singular (points are collinear), return None
@@ -361,6 +385,80 @@ class TurtlebotLocalization:
         marker_msg = MarkerArray()
         marker_msg.markers = markers_list
         self.marker_pub.publish(marker_msg)
+
+    def publish_obs_point(self,obs_point):
+        msg = PointStamped()
+        msg.header.frame_id = "world_ned"
+        msg.header.stamp = rospy.Time.now()
+
+        msg.point.x = obs_point[0,0]
+        msg.point.y = obs_point[1,0]
+        msg.point.z = -0.0945
+        self.obs_point_pub.publish(msg)
+
+    def publish_aruco_ranges_vis(self,aruco_ranges,obs_point):
+        ranges_list = []
+        # create Marker message for each feature in state
+        for marker in range(len(aruco_ranges)):
+            m = Marker()
+            m.header.frame_id = "world_ned"
+            m.header.stamp = rospy.Time.now()
+            m.ns = f"aruco_ranges_{marker}"
+            m.id = 0
+            m.type = Marker.CYLINDER
+            m.action = Marker.ADD
+
+            m.pose.position.x = obs_point[0,0]
+            m.pose.position.y = obs_point[1,0]
+            m.pose.position.z = 0.0
+
+            m.scale.x = 2*aruco_ranges[marker]
+            m.scale.y = 2*aruco_ranges[marker]
+            m.scale.z = 0.05
+
+            m.color.a = 1.0
+            m.color.r = 0.0
+            m.color.g = 1.0
+            m.color.b = 0.0
+
+            ranges_list.append(m)
+
+        # publish MarkerArray
+        range_vis_msg = MarkerArray()
+        range_vis_msg.markers = ranges_list
+        self.aruco_ranges_pub.publish(range_vis_msg)
+
+    def publish_trilateration_ranges(self,ranges,obs_points):
+        obs_list = []
+        # create Marker message for each feature in state
+        for obs in range(len(ranges)):
+            m = Marker()
+            m.header.frame_id = "world_ned"
+            m.header.stamp = rospy.Time.now()
+            m.ns = f"observation_{obs}"
+            m.id = 0
+            m.type = Marker.CYLINDER
+            m.action = Marker.ADD
+
+            m.pose.position.x = obs_points[obs][0]
+            m.pose.position.y = obs_points[obs][1]
+            m.pose.position.z = 0.0
+
+            m.scale.x = 2*ranges[obs]
+            m.scale.y = 2*ranges[obs]
+            m.scale.z = 0.05
+
+            m.color.a = 1.0
+            m.color.r = 0.3*(obs+1)
+            m.color.g = 0.0
+            m.color.b = 0.3*(3-obs)
+
+            obs_list.append(m)
+
+        # publish MarkerArray
+        obs_vis_msg = MarkerArray()
+        obs_vis_msg.markers = obs_list
+        self.trilateration_pub.publish(obs_vis_msg)
 
 
 
