@@ -12,18 +12,7 @@ This package contains:
 
 * `aruco_detector_node.py`: node to detect ArUco markers from RealSense camera and publish the range and the ID of detected markers.
 
-## Dependencies
-
-This package contains a custom message. This message can be found in this [repo](https://github.com/vaniakmulia/ho_custom_msgs) (Note: currently this is a private repo!). This package must be added to your `catkin_ws` (or the same workspace as this package).
-
-Run the command lines below on a terminal
-
-```bash
-cd catkin_ws/src
-git clone git@github.com:vaniakmulia/ho_custom_msgs.git
-```
-
-After adding the package, you have to build the package (using `catkin build`) and re-source the workspace.
+Furthermore, this package also contains a custom ROS message, `ArucoRange`, which is used by the nodes in this package.
 
 ## Running the Package
 
@@ -84,5 +73,5 @@ sudo apt-get install ros-noetic-teleop-twist-keyboard
 For more information, refer to this [link](https://wiki.ros.org/teleop_twist_keyboard).
 
 <sup>
-Last updated by Vania - 18/04/2024
+Last updated by Vania - 28/04/2024
 </sup>
