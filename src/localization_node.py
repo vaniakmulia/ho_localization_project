@@ -211,7 +211,7 @@ class TurtlebotLocalization:
                 # if trilateration succeeds, add the feature to the states
                 if xf and yf:
                     # Debugging: visualize the 3 ranges in Rviz
-                    self.publish_trilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id])
+                    self.publish_trilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id],xf,yf)
                     print("Trilateration succeed.")
                     self.feature_states.append([xf,yf])
                     self.feature_states_id.append(id)
@@ -348,7 +348,9 @@ class TurtlebotLocalization:
 
         # Solve linear system with least-squares
         try:
-            xf, yf = np.linalg.lstsq(A, b)[0]
+            check = np.linalg.solve(A,b)
+            results = np.linalg.lstsq(A, b, rcond=0.2)
+            xf,yf = results[0]
             return xf, yf
         except np.linalg.LinAlgError:
             # If the linear system is singular (points are collinear), return None
@@ -375,8 +377,8 @@ class TurtlebotLocalization:
             m.scale.z = 0.1
 
             m.color.a = 1.0
-            m.color.r = 0.0
-            m.color.g = 0.0
+            m.color.r = 1.0
+            m.color.g = 1.0
             m.color.b = 1.0
 
             markers_list.append(m)
@@ -385,6 +387,8 @@ class TurtlebotLocalization:
         marker_msg = MarkerArray()
         marker_msg.markers = markers_list
         self.marker_pub.publish(marker_msg)
+
+    ## DEBUGGING FUNCTIONS
 
     def publish_obs_point(self,obs_point):
         msg = PointStamped()
@@ -416,7 +420,7 @@ class TurtlebotLocalization:
             m.scale.y = 2*aruco_ranges[marker]
             m.scale.z = 0.05
 
-            m.color.a = 1.0
+            m.color.a = 0.5
             m.color.r = 0.0
             m.color.g = 1.0
             m.color.b = 0.0
@@ -428,32 +432,81 @@ class TurtlebotLocalization:
         range_vis_msg.markers = ranges_list
         self.aruco_ranges_pub.publish(range_vis_msg)
 
-    def publish_trilateration_ranges(self,ranges,obs_points):
+    def publish_trilateration_ranges(self,ranges,obs_points,xf,yf):
         obs_list = []
         # create Marker message for each feature in state
         for obs in range(len(ranges)):
-            m = Marker()
-            m.header.frame_id = "world_ned"
-            m.header.stamp = rospy.Time.now()
-            m.ns = f"observation_{obs}"
-            m.id = 0
-            m.type = Marker.CYLINDER
-            m.action = Marker.ADD
+            # show the ranges
+            m1 = Marker()
+            m1.header.frame_id = "world_ned"
+            m1.header.stamp = rospy.Time.now()
+            m1.ns = f"observation_{obs}"
+            m1.id = 0
+            m1.type = Marker.CYLINDER
+            m1.action = Marker.ADD
 
-            m.pose.position.x = obs_points[obs][0]
-            m.pose.position.y = obs_points[obs][1]
-            m.pose.position.z = 0.0
+            m1.pose.position.x = obs_points[obs][0]
+            m1.pose.position.y = obs_points[obs][1]
+            m1.pose.position.z = 0.0
 
-            m.scale.x = 2*ranges[obs]
-            m.scale.y = 2*ranges[obs]
-            m.scale.z = 0.05
+            m1.scale.x = 2*ranges[obs]
+            m1.scale.y = 2*ranges[obs]
+            m1.scale.z = 0.05
 
-            m.color.a = 1.0
-            m.color.r = 0.3*(obs+1)
-            m.color.g = 0.0
-            m.color.b = 0.3*(3-obs)
+            m1.color.a = 0.5
+            m1.color.r = 0.3*(obs+1)
+            m1.color.g = 0.0
+            m1.color.b = 0.3*(3-obs)
 
-            obs_list.append(m)
+            obs_list.append(m1)
+
+            # show the observation points
+            m2 = Marker()
+            m2.header.frame_id = "world_ned"
+            m2.header.stamp = rospy.Time.now()
+            m2.ns = f"observation_{obs}"
+            m2.id = 1
+            m2.type = Marker.SPHERE
+            m2.action = Marker.ADD
+
+            m2.pose.position.x = obs_points[obs][0]
+            m2.pose.position.y = obs_points[obs][1]
+            m2.pose.position.z = 0.0
+
+            m2.scale.x = 0.1
+            m2.scale.y = 0.1
+            m2.scale.z = 0.1
+
+            m2.color.a = 1.0
+            m2.color.r = 0.3*(obs+1)
+            m2.color.g = 0.0
+            m2.color.b = 0.3*(3-obs)
+
+            obs_list.append(m2)
+
+        # show the trilateration result
+        m3 = Marker()
+        m3.header.frame_id = "world_ned"
+        m3.header.stamp = rospy.Time.now()
+        m3.ns = "result"
+        m3.id = 0
+        m3.type = Marker.SPHERE
+        m3.action = Marker.ADD
+
+        m3.pose.position.x = xf
+        m3.pose.position.y = yf
+        m3.pose.position.z = 0.0
+
+        m3.scale.x = 0.2
+        m3.scale.y = 0.2
+        m3.scale.z = 0.2
+
+        m3.color.a = 1.0
+        m3.color.r = 0.0
+        m3.color.g = 1.0
+        m3.color.b = 0.0
+
+        obs_list.append(m3)
 
         # publish MarkerArray
         obs_vis_msg = MarkerArray()
