@@ -15,7 +15,7 @@ from cv_bridge import CvBridge
 import cv2
 from sensor_msgs.msg import Image, CameraInfo
 
-from ho_custom_msgs.msg import ArucoRange # a newly created ROS msg
+from ho_localization_project.msg import ArucoRange # a newly created ROS msg
 
 class ArUcoDetector:
     def __init__(self) -> None:
