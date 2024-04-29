@@ -324,12 +324,13 @@ class TurtlebotLocalization:
         x2, y2 = observation_points[1]
         x3, y3 = observation_points[2]
 
-        print("x1 = ", x1)
-        print("y1 = ", y1)
-
         # Extract distances
         d1, d2, d3 = observation_ranges
 
+
+        print("d1 = ", d1)
+        
+        
         print("d1 = ", d1)
         
         # Calculate coefficients for linear system
@@ -348,8 +349,8 @@ class TurtlebotLocalization:
 
         # Solve linear system with least-squares
         try:
-            check = np.linalg.solve(A,b)
-            results = np.linalg.lstsq(A, b, rcond=0.2)
+            xf,yf = np.linalg.solve(A,b)
+            results = np.linalg.lstsq(A, b, rcond=0.4)
             xf,yf = results[0]
             return xf, yf
         except np.linalg.LinAlgError:
