@@ -207,7 +207,8 @@ class TurtlebotLocalization:
             # check if the marker already has 3 observations
             if len(self.feature_observation_ranges[id]) == 3:
                 print(f"Perform trilateration on feature {id}.")
-                xf,yf = self.trilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
+                xfi,Pfi = self.trilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
+                xf,yf = xfi[0,0],xfi[1,0]
                 # if trilateration succeeds, add the feature to the states
                 if xf and yf:
                     # Debugging: visualize the 3 ranges in Rviz
@@ -317,45 +318,34 @@ class TurtlebotLocalization:
         dist1 = np.linalg.norm(np.subtract(observation_points[0],observation_points[1]))
         dist2 = np.linalg.norm(np.subtract(observation_points[1],observation_points[2]))
         if (dist1 < dist_threshold) or (dist2 < dist_threshold):
-            return None, None
+            xk = np.array([[None],[None]])
+            return xk, None
 
         # extract coordinates of observation points
-        x1, y1 = observation_points[0]
-        x2, y2 = observation_points[1]
-        x3, y3 = observation_points[2]
+        p1 = np.array(observation_points[0]).reshape((-1,1))
+        p2 = np.array(observation_points[1]).reshape((-1,1))
+        p3 = np.array(observation_points[2]).reshape((-1,1))
+
+        P = np.block([p1,p2,p3])
 
         # Extract distances
-        d1, d2, d3 = observation_ranges
+        r = np.array(observation_ranges).T
 
+        # Hard-code range uncertainties (?)
+        R = np.diag([0.2,0.2,0.2])
 
-        print("d1 = ", d1)
-        
-        
-        print("d1 = ", d1)
-        
-        # Calculate coefficients for linear system
-        A = 2 * np.array([
-            [x3 - x1, y3 - y1],
-            [x3 - x2, y3 - y2]
-        ])
-        
-        b = np.array([
-            (d1 ** 2 - d3 ** 2 + x3 ** 2 - x1 ** 2 + y3 ** 2 - y1 ** 2),
-            (d2 ** 2 - d3 ** 2 + x3 ** 2 - x2 ** 2 + y3 ** 2 - y2 ** 2)
-        ])
-        
-        print("A = ", A)
-        print("b = ", b)
+        # Unconstrained least squares multilateration formulation
+        d = r * r # Hadamard product
+        H = np.block([2*P.T, -1*np.ones((3,1))])
+        z = (np.diag(P.T @ P)).reshape((-1,1)) - d
+        Pxi = 4 * np.diag(r.flatten()) @ R @ np.diag(r.flatten())
+        W = np.linalg.inv(Pxi)
+        theta_WLS = np.linalg.inv(H.T @ W @ H) @ H.T @ W @ z
+        N = np.block([np.eye(2),np.zeros((2,1))])
+        xk = N @ theta_WLS
+        Pk = N @ np.linalg.inv(H.T @ W @ H) @ N.T
 
-        # Solve linear system with least-squares
-        try:
-            xf,yf = np.linalg.solve(A,b)
-            results = np.linalg.lstsq(A, b, rcond=0.4)
-            xf,yf = results[0]
-            return xf, yf
-        except np.linalg.LinAlgError:
-            # If the linear system is singular (points are collinear), return None
-            return None, None
+        return xk,Pk
         
     def send_feature(self):
         markers_list = []
