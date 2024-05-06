@@ -60,10 +60,10 @@ class TurtlebotLocalization:
         self.feature_states_id = [] # ArUco ID of features already in state vector
 
         # feature observations
-        self.feature_observation_ranges = {} # dict of ranges for trilateration
-        self.feature_observation_points = {} # dict of observation points for trilateration
+        self.feature_observation_ranges = {} # dict of ranges for multilateration
+        self.feature_observation_points = {} # dict of observation points for multilateration
 
-        # transformation from base_footprint to camera frame (for trilateration)
+        # transformation from base_footprint to camera frame (for multilateration)
         self.base_to_cam = np.zeros((3,1))
 
         # instantiate filter
@@ -80,7 +80,7 @@ class TurtlebotLocalization:
 
         self.obs_point_pub = rospy.Publisher("/obs_point_vis", PointStamped, queue_size=1)
         self.aruco_ranges_pub = rospy.Publisher("/aruco_range_vis", MarkerArray, queue_size=1)
-        self.trilateration_pub = rospy.Publisher("/trilateration_vis", MarkerArray, queue_size=1)
+        self.multilateration_pub = rospy.Publisher("/trilateration_vis", MarkerArray, queue_size=1)
 
         # Timer
         self.timer = rospy.Timer(rospy.Duration(0.1), self.send_messages)
@@ -188,7 +188,7 @@ class TurtlebotLocalization:
                 # Debugging: publish obs_point to Rviz
                 self.publish_obs_point(obs_point)
                 
-                # store the ranges and observation points for trilateration
+                # store the ranges and observation points for multilateration
                 if id not in self.feature_observation_ranges.keys(): # marker ID observed for the first time
                     self.feature_observation_ranges[id] = [marker_range[n]]
                     self.feature_observation_points[id] = [(obs_point[0,0],obs_point[1,0])]
@@ -199,19 +199,19 @@ class TurtlebotLocalization:
         print("Feature observation ranges = ", self.feature_observation_ranges)
         print("Feature observation points = ", self.feature_observation_points)
         
-        # Perform trilateration
+        # Perform multilateration
         feature_observation_ranges_copy = self.feature_observation_ranges.copy() # to avoid changing length of dict in iteration
         for id in feature_observation_ranges_copy.keys():
-            # check if the marker already has 3 observations
-            if len(self.feature_observation_ranges[id]) == 3:
-                print(f"Perform trilateration on feature {id}.")
-                xfi,Pfi = self.trilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
+            # check if the marker already has 4 observations
+            if len(self.feature_observation_ranges[id]) == 4:
+                print(f"Perform multilateration on feature {id}.")
+                xfi,Pfi = self.multilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
                 xf,yf = xfi[0,0],xfi[1,0]
-                # if trilateration succeeds, add the feature to the states
+                # if multilateration succeeds, add the feature to the states
                 if xf and yf:
-                    # Debugging: visualize the 3 ranges in Rviz
-                    self.publish_trilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id],xf,yf)
-                    print("Trilateration succeed.")
+                    # Debugging: visualize the ranges in Rviz
+                    self.publish_multilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id],xf,yf)
+                    print("Multilateration succeed.")
                     self.feature_states.append([xf,yf])
                     self.xk = np.vstack((self.xk,xfi)) # append to the state vector
                     self.feature_states_id.append(id)
@@ -221,8 +221,11 @@ class TurtlebotLocalization:
                     del self.feature_observation_ranges[id]
                     del self.feature_observation_points[id]
 
-                else: # if trilateration fails
-                    print("Trilateration failed.")
+                    # debugging
+                    print("xk = ", self.xk)
+
+                else: # if multilateration fails
+                    print("Multilateration failed.")
                     # remove the first observation, and let the robot makes a new observation later
                     self.feature_observation_ranges[id].pop(0)
                     self.feature_observation_points[id].pop(0)
@@ -284,8 +287,6 @@ class TurtlebotLocalization:
         self.send_feature()
 
     def send_odom(self):
-        # debugging
-        print("xk = ", self.xk)
         # publish Odometry message
         odom_msg = Odometry()
         odom_msg.pose.pose.position.x = self.xk[0,0]
@@ -314,12 +315,13 @@ class TurtlebotLocalization:
 
         self.odom_pub.publish(odom_msg)
 
-    def trilateration(self,observation_ranges,observation_points):
-        # don't perform trilateration if the distance between observation points is less than a threshold
+    def multilateration(self,observation_ranges,observation_points):
+        # don't perform multilateration if the distance between observation points is less than a threshold
         dist_threshold = 0.2
         dist1 = np.linalg.norm(np.subtract(observation_points[0],observation_points[1]))
         dist2 = np.linalg.norm(np.subtract(observation_points[1],observation_points[2]))
-        if (dist1 < dist_threshold) or (dist2 < dist_threshold):
+        dist3 = np.linalg.norm(np.subtract(observation_points[2],observation_points[3]))
+        if (dist1 < dist_threshold) or (dist2 < dist_threshold) or (dist3 < dist_threshold):
             xk = np.array([[None],[None]])
             return xk, None
 
@@ -327,25 +329,26 @@ class TurtlebotLocalization:
         p1 = np.array(observation_points[0]).reshape((-1,1))
         p2 = np.array(observation_points[1]).reshape((-1,1))
         p3 = np.array(observation_points[2]).reshape((-1,1))
+        p4 = np.array(observation_points[3]).reshape((-1,1))
 
-        P = np.block([p1,p2,p3])
+        P = np.block([p1,p2,p3,p4])
 
         print("P = ", P)
 
         # Extract distances
-        r = np.array(observation_ranges).reshape((3,1))
+        r = np.array(observation_ranges).reshape((-1,1))
 
         print("r = ", r)
 
         # Hard-code range uncertainties (?)
-        R = np.diag([0.5,0.5,0.5])
+        R = np.diag([0.5,0.5,0.5,0.5])
 
         print("R = ", R)
 
         # Unconstrained least squares multilateration formulation
         d = r * r # Hadamard product
         print("d = ", d)
-        H = np.block([2*P.T, -1*np.ones((3,1))])
+        H = np.block([2*P.T, -1*np.ones((P.shape[1],1))])
         print("H = ", H)
         z = (np.diag(P.T @ P)).reshape((-1,1)) - d
         print("z = ", z)
@@ -440,7 +443,7 @@ class TurtlebotLocalization:
         range_vis_msg.markers = ranges_list
         self.aruco_ranges_pub.publish(range_vis_msg)
 
-    def publish_trilateration_ranges(self,ranges,obs_points,xf,yf):
+    def publish_multilateration_ranges(self,ranges,obs_points,xf,yf):
         obs_list = []
         # create Marker message for each feature in state
         for obs in range(len(ranges)):
@@ -462,9 +465,9 @@ class TurtlebotLocalization:
             m1.scale.z = 0.05
 
             m1.color.a = 0.5
-            m1.color.r = 0.3*(obs+1)
+            m1.color.r = 0.25*(obs+1)
             m1.color.g = 0.0
-            m1.color.b = 0.3*(3-obs)
+            m1.color.b = 0.25*(4-obs)
 
             obs_list.append(m1)
 
@@ -486,13 +489,13 @@ class TurtlebotLocalization:
             m2.scale.z = 0.1
 
             m2.color.a = 1.0
-            m2.color.r = 0.3*(obs+1)
+            m2.color.r = 0.25*(obs+1)
             m2.color.g = 0.0
-            m2.color.b = 0.3*(3-obs)
+            m2.color.b = 0.25*(4-obs)
 
             obs_list.append(m2)
 
-        # show the trilateration result
+        # show the multilateration result
         m3 = Marker()
         m3.header.frame_id = "world_ned"
         m3.header.stamp = rospy.Time.now()
@@ -519,7 +522,7 @@ class TurtlebotLocalization:
         # publish MarkerArray
         obs_vis_msg = MarkerArray()
         obs_vis_msg.markers = obs_list
-        self.trilateration_pub.publish(obs_vis_msg)
+        self.multilateration_pub.publish(obs_vis_msg)
 
 
 
