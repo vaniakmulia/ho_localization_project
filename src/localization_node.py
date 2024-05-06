@@ -12,6 +12,8 @@ from visualization_msgs.msg import Marker,MarkerArray
 import tf
 import time
 
+import scipy
+
 from filter import *
 from ho_localization_project.msg import ArucoRange # a newly created ROS msg
 
@@ -19,10 +21,9 @@ from geometry_msgs.msg import PointStamped
 
 class TurtlebotLocalization:
     def __init__(self) -> None:
-        # initialize robot pose
-        self.x = 0
-        self.y = 0
-        self.yaw = 0
+
+        # initialize state vector with the initial robot pose
+        self.xk = np.zeros((3,1))
 
         # initialize robot pose covariance
         self.Pk = np.zeros((3,3))
@@ -66,7 +67,7 @@ class TurtlebotLocalization:
         self.base_to_cam = np.zeros((3,1))
 
         # instantiate filter
-        self.filter = EKF(np.array([self.x,self.y,self.yaw]).reshape(3,1),self.Pk)
+        self.filter = EKF(self.xk,self.Pk)
 
         # Subscribers
         self.encoder_sub = rospy.Subscriber("/turtlebot/joint_states",JointState,self.encoder_callback)
@@ -105,7 +106,7 @@ class TurtlebotLocalization:
             if self.right_wheel_flag and self.left_wheel_flag:
                 # Pre-processing for Prediction
                 # rospy.loginfo("Performing prediction.")
-                xk_1 = np.array([self.x,self.y,self.yaw]).reshape(3,1)
+                xk_1 = self.xk
                 Pk_1 = self.Pk
                 self.Re = np.diag([self.left_wheel_cov,self.right_wheel_cov])
 
@@ -116,9 +117,7 @@ class TurtlebotLocalization:
                 xk_bar,Pk_bar = self.filter.Prediction(xk_1,Pk_1,uk,Qk)
 
                 # Save Prediction result
-                self.x = xk_bar[0,0]
-                self.y = xk_bar[1,0]
-                self.yaw = xk_bar[2,0]
+                self.xk = xk_bar
                 self.Pk = Pk_bar
 
                 # Reset the flags
@@ -134,26 +133,25 @@ class TurtlebotLocalization:
         
         # Start the localization when the node receives the first IMU reading
         if not self.start:
-            self.yaw = yaw # store the first IMU yaw reading as the initial yaw value
+            self.xk[2,0] = yaw # store the first IMU yaw reading as the initial yaw value
             self.start = True # start the localization
         else:
             # Pre-processing for Update
             # rospy.loginfo("Updating with IMU.")
             zk = np.array([[yaw]])
             Rk = np.array([[imu_msg.orientation_covariance[8]]])
-            Hk = np.array([[0,0,1]])
+            Hk = np.array([[0,0,1]]) # for robot pose only
+            Hk = np.block([Hk,np.zeros((1,self.xk.shape[0]-3))])
             Vk = np.eye(1)
 
-            xk_bar = np.array([self.x,self.y,self.yaw]).reshape(3,1)
+            xk_bar = self.xk
             Pk_bar = self.Pk
 
             # Perform Update
             xk,Pk = self.filter.Update(xk_bar,Pk_bar,zk,Rk,Hk,Vk)
 
             # Save Update results
-            self.x = xk[0,0]
-            self.y = xk[1,0]
-            self.yaw = xk[2,0]
+            self.xk = xk
             self.Pk = Pk
 
     def feature_callback(self,range_msg):
@@ -169,7 +167,7 @@ class TurtlebotLocalization:
         
         # get observation point = tf from world_ned to camera_color_frame
         # obtained from pose compounding of odom \oplus (base_footprint to camera)
-        world_to_base = np.array([self.x,self.y,self.yaw]).reshape((3,1))
+        world_to_base = self.xk[:3]
         obs_point = Pose3D(world_to_base).oplus(self.base_to_cam)
 
         print("Range msg = ",range_msg)
@@ -215,7 +213,9 @@ class TurtlebotLocalization:
                     self.publish_trilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id],xf,yf)
                     print("Trilateration succeed.")
                     self.feature_states.append([xf,yf])
+                    self.xk = np.vstack((self.xk,xfi)) # append to the state vector
                     self.feature_states_id.append(id)
+                    self.Pk = scipy.linalg.block_diag(self.Pk,Pfi)
                     
                     # remove it from the list of observations to trilaterate
                     del self.feature_observation_ranges[id]
@@ -274,8 +274,8 @@ class TurtlebotLocalization:
         self.send_odom()
         # publish tf
         br = tf.TransformBroadcaster()
-        br.sendTransform((self.x, self.y, 0),
-                        tf.transformations.quaternion_from_euler(0, 0, self.yaw),
+        br.sendTransform((self.xk[0,0], self.xk[1,0], 0),
+                        tf.transformations.quaternion_from_euler(0, 0, self.xk[2,0]),
                         rospy.Time.now(),
                         "turtlebot/kobuki/base_footprint",
                         "world_ned")
@@ -284,13 +284,15 @@ class TurtlebotLocalization:
         self.send_feature()
 
     def send_odom(self):
+        # debugging
+        print("xk = ", self.xk)
         # publish Odometry message
         odom_msg = Odometry()
-        odom_msg.pose.pose.position.x = self.x
-        odom_msg.pose.pose.position.y = self.y
+        odom_msg.pose.pose.position.x = self.xk[0,0]
+        odom_msg.pose.pose.position.y = self.xk[1,0]
         odom_msg.pose.pose.position.z = 0
 
-        yaw_quaternion = tf.transformations.quaternion_from_euler(0,0,self.yaw)
+        yaw_quaternion = tf.transformations.quaternion_from_euler(0,0,self.xk[2,0])
         odom_msg.pose.pose.orientation.x = yaw_quaternion[0]
         odom_msg.pose.pose.orientation.y = yaw_quaternion[1]
         odom_msg.pose.pose.orientation.z = yaw_quaternion[2]
@@ -328,22 +330,37 @@ class TurtlebotLocalization:
 
         P = np.block([p1,p2,p3])
 
+        print("P = ", P)
+
         # Extract distances
-        r = np.array(observation_ranges).T
+        r = np.array(observation_ranges).reshape((3,1))
+
+        print("r = ", r)
 
         # Hard-code range uncertainties (?)
-        R = np.diag([0.2,0.2,0.2])
+        R = np.diag([0.5,0.5,0.5])
+
+        print("R = ", R)
 
         # Unconstrained least squares multilateration formulation
         d = r * r # Hadamard product
+        print("d = ", d)
         H = np.block([2*P.T, -1*np.ones((3,1))])
+        print("H = ", H)
         z = (np.diag(P.T @ P)).reshape((-1,1)) - d
+        print("z = ", z)
         Pxi = 4 * np.diag(r.flatten()) @ R @ np.diag(r.flatten())
+        print("Pxi = ", Pxi)
         W = np.linalg.inv(Pxi)
+        print("W = ", W)
         theta_WLS = np.linalg.inv(H.T @ W @ H) @ H.T @ W @ z
+        print("theta_WLS = ", theta_WLS)
         N = np.block([np.eye(2),np.zeros((2,1))])
+        print("N = ", N)
         xk = N @ theta_WLS
+        print("xk = ", xk)
         Pk = N @ np.linalg.inv(H.T @ W @ H) @ N.T
+        print("Pk = ", Pk)
 
         return xk,Pk
         
