@@ -86,7 +86,8 @@ class TurtlebotLocalization:
         self.timer = rospy.Timer(rospy.Duration(0.1), self.send_messages)
 
 
-    ## Subscriber callbacks ###################
+    ## DEAD-RECKONING ###################
+
     def encoder_callback(self,states_msg):
         if self.start:
             # assign the wheel encoder values
@@ -154,90 +155,6 @@ class TurtlebotLocalization:
             self.xk = xk
             self.Pk = Pk
 
-    def feature_callback(self,range_msg):
-        # obtain tf from base_footprint to camera frame
-        if not self.base_to_cam.any():
-            try:
-                listener = tf.TransformListener()
-                (trans,rot) = listener.lookupTransform('turtlebot/kobuki/base_footprint', 'camera_color_frame', rospy.Time(0))
-                _,_,angle = tf.transformations.euler_from_quaternion(rot)
-                self.base_to_cam = np.array([trans[0],trans[1],angle]).reshape((3,1))
-            except:
-                pass
-        
-        # get observation point = tf from world_ned to camera_color_frame
-        # obtained from pose compounding of odom \oplus (base_footprint to camera)
-        world_to_base = self.xk[:3]
-        obs_point = Pose3D(world_to_base).oplus(self.base_to_cam)
-
-        print("Range msg = ",range_msg)
-        marker_id = list(range_msg.id)
-        marker_range = list(range_msg.range)
-
-        # Debugging: publish Aruco ranges to Rviz
-        self.publish_aruco_ranges_vis(marker_range,obs_point)
-
-        print("Marker id = ", marker_id)
-        print("Marker range = ", marker_range)
-
-        for n in range(len(marker_id)):
-            id = marker_id[n]
-            # only add features to the states if it still doesn't exist in the states
-            if id not in self.feature_states_id:
-                              
-                # Debugging: publish obs_point to Rviz
-                self.publish_obs_point(obs_point)
-                
-                # store the ranges and observation points for multilateration
-                if id not in self.feature_observation_ranges.keys(): # marker ID observed for the first time
-                    self.feature_observation_ranges[id] = [marker_range[n]]
-                    self.feature_observation_points[id] = [(obs_point[0,0],obs_point[1,0])]
-                else:
-                    self.feature_observation_ranges[id].append(marker_range[n])
-                    self.feature_observation_points[id].append((obs_point[0,0],obs_point[1,0]))
-
-        print("Feature observation ranges = ", self.feature_observation_ranges)
-        print("Feature observation points = ", self.feature_observation_points)
-        
-        # Perform multilateration
-        feature_observation_ranges_copy = self.feature_observation_ranges.copy() # to avoid changing length of dict in iteration
-        for id in feature_observation_ranges_copy.keys():
-            # check if the marker already has 4 observations
-            if len(self.feature_observation_ranges[id]) == 4:
-                print(f"Perform multilateration on feature {id}.")
-                xfi,Pfi = self.multilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
-                xf,yf = xfi[0,0],xfi[1,0]
-                # if multilateration succeeds, add the feature to the states
-                if xf and yf:
-                    # Debugging: visualize the ranges in Rviz
-                    self.publish_multilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id],xf,yf)
-                    print("Multilateration succeed.")
-                    self.feature_states.append([xf,yf])
-                    self.xk = np.vstack((self.xk,xfi)) # append to the state vector
-                    self.feature_states_id.append(id)
-                    self.Pk = scipy.linalg.block_diag(self.Pk,Pfi)
-                    
-                    # remove it from the list of observations to trilaterate
-                    del self.feature_observation_ranges[id]
-                    del self.feature_observation_points[id]
-
-                    # debugging
-                    print("xk = ", self.xk)
-
-                else: # if multilateration fails
-                    print("Multilateration failed.")
-                    # remove the first observation, and let the robot makes a new observation later
-                    self.feature_observation_ranges[id].pop(0)
-                    self.feature_observation_points[id].pop(0)
-
-        # Debugging
-        print("Features in states = ", self.feature_states)
-        print("Features in states id = ", self.feature_states_id)
-
-
-
-    ## Other functions ###################
-
     def encoder_to_displacement(self,wl,wr,Re):
         # set time interval
         # previous time = the later timestamp between the 2 wheels
@@ -270,50 +187,109 @@ class TurtlebotLocalization:
         Qk = A @ Re @ A.T
 
         return uk,Qk
-    
-    def send_messages(self,event):
-        # rospy.loginfo("Publishing odometry.")
-        # publish Odometry
-        self.send_odom()
-        # publish tf
-        br = tf.TransformBroadcaster()
-        br.sendTransform((self.xk[0,0], self.xk[1,0], 0),
-                        tf.transformations.quaternion_from_euler(0, 0, self.xk[2,0]),
-                        rospy.Time.now(),
-                        "turtlebot/kobuki/base_footprint",
-                        "world_ned")
+
+    ## FEATURE OBSERVATION ########################
+
+    def feature_callback(self,range_msg):
+        # obtain tf from base_footprint to camera frame
+        if not self.base_to_cam.any():
+            try:
+                listener = tf.TransformListener()
+                (trans,rot) = listener.lookupTransform('turtlebot/kobuki/base_footprint', 'camera_color_frame', rospy.Time(0))
+                _,_,angle = tf.transformations.euler_from_quaternion(rot)
+                self.base_to_cam = np.array([trans[0],trans[1],angle]).reshape((3,1))
+            except:
+                pass
         
-        # publish feature visualization
-        self.send_feature()
+        # get observation point = tf from world_ned to camera_color_frame
+        # obtained from pose compounding of odom \oplus (base_footprint to camera)
+        world_to_base = self.xk[:3]
+        obs_point = Pose3D(world_to_base).oplus(self.base_to_cam)
 
-    def send_odom(self):
-        # publish Odometry message
-        odom_msg = Odometry()
-        odom_msg.pose.pose.position.x = self.xk[0,0]
-        odom_msg.pose.pose.position.y = self.xk[1,0]
-        odom_msg.pose.pose.position.z = 0
+        # Debugging: publish obs_point to Rviz
+        self.publish_obs_point(obs_point)
 
-        yaw_quaternion = tf.transformations.quaternion_from_euler(0,0,self.xk[2,0])
-        odom_msg.pose.pose.orientation.x = yaw_quaternion[0]
-        odom_msg.pose.pose.orientation.y = yaw_quaternion[1]
-        odom_msg.pose.pose.orientation.z = yaw_quaternion[2]
-        odom_msg.pose.pose.orientation.w = yaw_quaternion[3]
+        # Extract observed markers
+        print("Range msg = ",range_msg)
+        marker_id = list(range_msg.id)
+        marker_range = list(range_msg.range)
 
-        Pk_expanded = np.array([[self.Pk[0,0],self.Pk[0,1],0,0,0,self.Pk[0,2]],
-                                [self.Pk[1,0],self.Pk[1,1],0,0,0,self.Pk[1,2]],
-                                [0,0,0,0,0,0],
-                                [0,0,0,0,0,0],
-                                [0,0,0,0,0,0],
-                                [self.Pk[2,0],self.Pk[2,1],0,0,0,self.Pk[2,2]]])
-        odom_msg.pose.covariance = list(Pk_expanded.flatten())
+        # Debugging: publish Aruco ranges to Rviz
+        self.publish_aruco_ranges_vis(marker_range,obs_point)
 
-        odom_msg.header.frame_id = "world_ned"
+        print("Marker id = ", marker_id)
+        print("Marker range = ", marker_range)
 
-        odom_msg.child_frame_id = "turtlebot/kobuki/base_footprint"
+        # Initialize observation vector and hypothesis list for feature update
+        zf = np.zeros((0,1))
+        Hp = []
 
-        odom_msg.header.stamp = rospy.Time.now()
+        for n in range(len(marker_id)): # loop for all markers observed
+            id_n = marker_id[n]
+            range_n = marker_range[n]
 
-        self.odom_pub.publish(odom_msg)
+            if id_n in self.feature_states_id: # if marker is already in the state vector
+                # store marker for update
+                zf = np.vstack((zf,np.array([[range_n]])))
+                Hp.append(id_n)
+            else:                             
+                # store the ranges and observation points for multilateration
+                self.prepare_feature_initialization(id_n,range_n,obs_point)
+
+        print("Feature observation ranges = ", self.feature_observation_ranges)
+        print("Feature observation points = ", self.feature_observation_points)
+        
+        # TODO: Perform feature update on mapped features
+
+        # Perform state augmentation on unmapped features
+        self.state_augmentation()
+
+        # Debugging
+        print("Features in states = ", self.feature_states)
+        print("Features in states id = ", self.feature_states_id)
+
+
+    def prepare_feature_initialization(self, id, marker_range, obs_point):
+        # store the ranges and observation points for multilateration
+        if id not in self.feature_observation_ranges.keys(): # marker ID observed for the first time
+            self.feature_observation_ranges[id] = [marker_range]
+            self.feature_observation_points[id] = [(obs_point[0,0],obs_point[1,0])]
+        else:
+            self.feature_observation_ranges[id].append(marker_range)
+            self.feature_observation_points[id].append((obs_point[0,0],obs_point[1,0]))
+
+
+    def state_augmentation(self):
+        feature_observation_ranges_copy = self.feature_observation_ranges.copy() # to avoid changing length of dict in iteration
+        for id in feature_observation_ranges_copy.keys():
+            # check if the marker already has 4 observations
+            if len(self.feature_observation_ranges[id]) == 4:
+                print(f"Perform multilateration on feature {id}.")
+                xfi,Pfi = self.multilateration(self.feature_observation_ranges[id],self.feature_observation_points[id])
+                xf,yf = xfi[0,0],xfi[1,0]
+                # if multilateration succeeds, add the feature to the states
+                if xf and yf:
+                    # Debugging: visualize the ranges in Rviz
+                    self.publish_multilateration_ranges(self.feature_observation_ranges[id],self.feature_observation_points[id],xf,yf)
+                    print("Multilateration succeed.")
+                    self.feature_states.append([xf,yf])
+                    self.xk = np.vstack((self.xk,xfi)) # append to the state vector
+                    self.feature_states_id.append(id)
+                    self.Pk = scipy.linalg.block_diag(self.Pk,Pfi) # TODO: confirm this!
+                    
+                    # remove it from the list of observations to trilaterate
+                    del self.feature_observation_ranges[id]
+                    del self.feature_observation_points[id]
+
+                    # debugging
+                    print("xk = ", self.xk)
+
+                else: # if multilateration fails
+                    print("Multilateration failed.")
+                    # remove the first observation, and let the robot makes a new observation later
+                    self.feature_observation_ranges[id].pop(0)
+                    self.feature_observation_points[id].pop(0)
+
 
     def multilateration(self,observation_ranges,observation_points):
         # don't perform multilateration if the distance between observation points is less than a threshold
@@ -366,6 +342,53 @@ class TurtlebotLocalization:
         print("Pk = ", Pk)
 
         return xk,Pk
+    
+    ## PUBLISHER FUNCTIONS ###################
+
+    def send_messages(self,event):
+        # rospy.loginfo("Publishing odometry.")
+        # publish Odometry
+        self.send_odom()
+        # publish tf
+        br = tf.TransformBroadcaster()
+        br.sendTransform((self.xk[0,0], self.xk[1,0], 0),
+                        tf.transformations.quaternion_from_euler(0, 0, self.xk[2,0]),
+                        rospy.Time.now(),
+                        "turtlebot/kobuki/base_footprint",
+                        "world_ned")
+        
+        # publish feature visualization
+        self.send_feature()
+
+    def send_odom(self):
+        # publish Odometry message
+        odom_msg = Odometry()
+        odom_msg.pose.pose.position.x = self.xk[0,0]
+        odom_msg.pose.pose.position.y = self.xk[1,0]
+        odom_msg.pose.pose.position.z = 0
+
+        yaw_quaternion = tf.transformations.quaternion_from_euler(0,0,self.xk[2,0])
+        odom_msg.pose.pose.orientation.x = yaw_quaternion[0]
+        odom_msg.pose.pose.orientation.y = yaw_quaternion[1]
+        odom_msg.pose.pose.orientation.z = yaw_quaternion[2]
+        odom_msg.pose.pose.orientation.w = yaw_quaternion[3]
+
+        Pk_expanded = np.array([[self.Pk[0,0],self.Pk[0,1],0,0,0,self.Pk[0,2]],
+                                [self.Pk[1,0],self.Pk[1,1],0,0,0,self.Pk[1,2]],
+                                [0,0,0,0,0,0],
+                                [0,0,0,0,0,0],
+                                [0,0,0,0,0,0],
+                                [self.Pk[2,0],self.Pk[2,1],0,0,0,self.Pk[2,2]]])
+        odom_msg.pose.covariance = list(Pk_expanded.flatten())
+
+        odom_msg.header.frame_id = "world_ned"
+
+        odom_msg.child_frame_id = "turtlebot/kobuki/base_footprint"
+
+        odom_msg.header.stamp = rospy.Time.now()
+
+        self.odom_pub.publish(odom_msg)
+
         
     def send_feature(self):
         markers_list = []
