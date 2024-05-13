@@ -46,11 +46,43 @@ class EKF:
 
         return xk_bar, Pk_bar
 
-    def Update(self,xk_bar,Pk_bar,zk,Rk,Hk,Vk):
+    def UpdateMeasurement(self,xk_bar,Pk_bar,zk,Rk,Hk,Vk):
 
         Kk = Pk_bar @ Hk.T @ np.linalg.inv(Hk@Pk_bar@Hk.T + Vk@Rk@Vk.T)
-        innovation = zk-self.h(xk_bar)
+        innovation = zk-self.hm(xk_bar)
         innovation[0,0] = wrap_angle(innovation[0,0])
+        self.xk = xk_bar + Kk@(innovation)
+
+        B = np.identity(np.shape(Kk@Hk)[0]) - Kk@Hk
+        self.Pk = B@Pk_bar@B.T
+
+        self.xk[2,0] = wrap_angle(self.xk[2,0])
+
+        return self.xk,self.Pk
+    
+    def DataAssociation(self,obs_id_list, state_id_list):
+        '''
+            Convert ArUco marker IDs into indices.
+        '''
+        H = []
+
+        for id in obs_id_list:
+            index = state_id_list.index(id)
+            H.append(index)
+
+        return H
+    
+    def UpdateFeature(self,xk_bar,Pk_bar,zk,Rk,Hk,Vk,H):
+
+        # print("xk_bar = ", xk_bar)
+        # print("Pk_bar = ", Pk_bar)
+        # print("zk = ", zk)
+        # print("Rk = ", Rk)
+        # print("Hk = ", Hk)
+        # print("Vk = ", Vk)
+
+        Kk = Pk_bar @ Hk.T @ np.linalg.inv(Hk@Pk_bar@Hk.T + Vk@Rk@Vk.T)
+        innovation = zk-self.hf(xk_bar,H)
         self.xk = xk_bar + Kk@(innovation)
 
         B = np.identity(np.shape(Kk@Hk)[0]) - Kk@Hk
@@ -75,8 +107,65 @@ class EKF:
 
         return J
     
-    def h(self, xk):  # return the expected observations
+    def hm(self, xk):  # return the expected observations
         z = xk[2]
 
         return z  
     
+    def hf(self,xk,H):
+        # initialize vector of expected feature observation
+        h = np.zeros((0, 1))  # empty vector
+        nf = len(H) # number of feature
+
+        for i in range(nf):
+            fi = H[i] # H = hypothesis
+
+            if not (fi == None):
+                h = np.block([[h], [self.hfi(xk,fi)]])    
+
+        return h
+
+    def hfi(self,xk,i):
+        # extract robot position
+        xr = xk[0,0]
+        yr = xk[1,0]
+
+        # extract feature position at index i
+        xfi = xk[2*i + 3]
+        yfi = xk[2*i + 4]
+
+        return np.sqrt((xfi-xr)**2 + (yfi-yr)**2)
+    
+    def Jhfx(self,xk,H):
+        # initialize Jacobian
+        J = np.zeros((0,xk.shape[0]))
+        nf = len(H) # number of feature
+
+        for i in range(nf):
+            fi = H[i]
+
+            if not (fi == None):
+                J = np.block([[J], [self.Jhfix(xk,fi)]])
+
+        return J
+    
+    def Jhfix(self,xk,i):
+        # extract robot position
+        xr = xk[0,0]
+        yr = xk[1,0]
+
+        # extract feature position at index i
+        xfi = xk[2*i + 3]
+        yfi = xk[2*i + 4]
+
+        # initialize row Jacobian
+        J = np.zeros((1,xk.shape[0]))
+
+        # fill the elements of J
+        J[0,0] = (xr-xfi)/np.sqrt((xfi-xr)**2 + (yfi-yr)**2)
+        J[0,1] = (yr-yfi)/np.sqrt((xfi-xr)**2 + (yfi-yr)**2)
+
+        J[0,2*i+3] = (-xr+xfi)/np.sqrt((xfi-xr)**2 + (yfi-yr)**2)
+        J[0,2*i+4] = (-yr+yfi)/np.sqrt((xfi-xr)**2 + (yfi-yr)**2)
+
+        return J

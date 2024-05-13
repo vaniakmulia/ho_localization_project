@@ -4,6 +4,7 @@
     Node to perform localization using EKF.
 '''
 
+import scipy.linalg
 import rospy
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState, Imu
@@ -149,7 +150,7 @@ class TurtlebotLocalization:
             Pk_bar = self.Pk
 
             # Perform Update
-            xk,Pk = self.filter.Update(xk_bar,Pk_bar,zk,Rk,Hk,Vk)
+            xk,Pk = self.filter.UpdateMeasurement(xk_bar,Pk_bar,zk,Rk,Hk,Vk)
 
             # Save Update results
             self.xk = xk
@@ -222,7 +223,8 @@ class TurtlebotLocalization:
 
         # Initialize observation vector and hypothesis list for feature update
         zf = np.zeros((0,1))
-        Hp = []
+        Rf = np.zeros((0,0))
+        zf_ids = []
 
         for n in range(len(marker_id)): # loop for all markers observed
             id_n = marker_id[n]
@@ -231,21 +233,35 @@ class TurtlebotLocalization:
             if id_n in self.feature_states_id: # if marker is already in the state vector
                 # store marker for update
                 zf = np.vstack((zf,np.array([[range_n]])))
-                Hp.append(id_n)
+                Rf = scipy.linalg.block_diag(Rf,np.array([[0.5]])) # range measurement uncertainty hard-coded
+                zf_ids.append(id_n)
             else:                             
                 # store the ranges and observation points for multilateration
                 self.prepare_feature_initialization(id_n,range_n,obs_point)
 
-        print("Feature observation ranges = ", self.feature_observation_ranges)
-        print("Feature observation points = ", self.feature_observation_points)
+        # print("Feature observation ranges = ", self.feature_observation_ranges)
+        # print("Feature observation points = ", self.feature_observation_points)
         
         # TODO: Perform feature update on mapped features
+        if zf.any():
+            # Pre-processing for update
+            xk_bar = self.xk
+            Pk_bar = self.Pk
+            H = self.filter.DataAssociation(zf_ids, self.feature_states_id)
+            Hk = self.filter.Jhfx(xk_bar,H)
+            Vk = np.eye(len(H))
+
+            xk,Pk = self.filter.UpdateFeature(xk_bar,Pk_bar,zf,Rf,Hk,Vk,H)
+
+            # Save Update results
+            self.xk = xk
+            self.Pk = Pk
 
         # Perform state augmentation on unmapped features
         self.state_augmentation()
 
         # Debugging
-        print("Features in states = ", self.feature_states)
+        # print("Features in states = ", self.feature_states)
         print("Features in states id = ", self.feature_states_id)
 
 
@@ -391,19 +407,21 @@ class TurtlebotLocalization:
 
         
     def send_feature(self):
+        nf = int((self.xk.shape[0] - 3)/2) # number of mapped features
+
         markers_list = []
         # create Marker message for each feature in state
-        for feature in range(len(self.feature_states_id)):
+        for i in range(nf):
             m = Marker()
             m.header.frame_id = "world_ned"
             m.header.stamp = rospy.Time.now()
             m.ns = "feature"
-            m.id = self.feature_states_id[feature]
+            m.id = self.feature_states_id[i]
             m.type = Marker.SPHERE
             m.action = Marker.ADD
 
-            m.pose.position.x = self.feature_states[feature][0]
-            m.pose.position.y = self.feature_states[feature][1]
+            m.pose.position.x = self.xk[2*i+3,0]
+            m.pose.position.y = self.xk[2*i+4,0]
             m.pose.position.z = 0.0
 
             m.scale.x = 0.1
