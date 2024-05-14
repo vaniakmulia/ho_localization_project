@@ -24,7 +24,8 @@ class TurtlebotLocalization:
     def __init__(self) -> None:
 
         # initialize state vector with the initial robot pose
-        self.xk = np.zeros((3,1))
+        # self.xk = np.zeros((3,1))
+        self.xk = np.array([3.0,-0.78,0.0]).reshape((3,1)) # to be used with hol_circuit2 scenario
 
         # initialize robot pose covariance
         self.Pk = np.zeros((3,3))
