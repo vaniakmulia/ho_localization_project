@@ -11,7 +11,6 @@ from sensor_msgs.msg import JointState, Imu
 import tf.transformations
 from visualization_msgs.msg import Marker,MarkerArray
 import tf
-import time
 
 import scipy
 
@@ -46,8 +45,8 @@ class TurtlebotLocalization:
         self.start = False
 
         # encoder timestamp
-        self.left_wheel_time = time.time()
-        self.right_wheel_time = time.time()
+        self.left_wheel_time = 0
+        self.right_wheel_time = 0
 
         # flag attribute to indicate left and right wheel encoder reading available
         self.right_wheel_flag = False
@@ -93,18 +92,24 @@ class TurtlebotLocalization:
     def encoder_callback(self,states_msg):
         if self.start:
             # assign the wheel encoder values
-            if states_msg.name[0] == "turtlebot/kobuki/wheel_right_joint":
-                self.wr = states_msg.velocity[0]
-                self.right_wheel_cov = np.deg2rad(3) #guess
-                self.right_wheel_flag = True
-                self.right_wheel_prev_time = self.right_wheel_time
-                self.right_wheel_time = time.time()
-            elif states_msg.name[0] == "turtlebot/kobuki/wheel_left_joint":
-                self.wl = states_msg.velocity[0]
-                self.left_wheel_cov = np.deg2rad(3) #guess
+            names_list = list(states_msg.name)
+            if "turtlebot/kobuki/wheel_left_joint" in names_list:
+                left_index = names_list.index("turtlebot/kobuki/wheel_left_joint")
+                # set left wheel
+                self.wl = states_msg.velocity[left_index]
+                self.left_wheel_cov = 0.1 #hard-coded
                 self.left_wheel_flag = True
                 self.left_wheel_prev_time = self.left_wheel_time
-                self.left_wheel_time = time.time()
+                self.left_wheel_time = states_msg.header.stamp
+
+            if "turtlebot/kobuki/wheel_right_joint" in names_list:
+                right_index = names_list.index("turtlebot/kobuki/wheel_right_joint")
+                # set right wheel
+                self.wr = states_msg.velocity[right_index]
+                self.right_wheel_cov = 0.1 #hard-coded
+                self.right_wheel_flag = True
+                self.right_wheel_prev_time = self.right_wheel_time
+                self.right_wheel_time = states_msg.header.stamp
             
             if self.right_wheel_flag and self.left_wheel_flag:
                 # Pre-processing for Prediction
@@ -127,6 +132,9 @@ class TurtlebotLocalization:
                 self.right_wheel_flag = False
                 self.left_wheel_flag = False
 
+                # Save current time
+                self.current_time = states_msg.header.stamp
+
     def imu_callback(self,imu_msg):        
         # Get the yaw reading from the magnetometer
         _,_,yaw = tf.transformations.euler_from_quaternion([imu_msg.orientation.x, 
@@ -134,15 +142,22 @@ class TurtlebotLocalization:
                                                             imu_msg.orientation.z,
                                                             imu_msg.orientation.w])
         
+        # store also initial time
+        self.left_wheel_time = imu_msg.header.stamp
+        self.right_wheel_time = imu_msg.header.stamp
+        self.current_time = imu_msg.header.stamp
+        
         # Start the localization when the node receives the first IMU reading
+        # NOTE: remove the negative sign for yaw if testing in simulation
         if not self.start:
-            self.xk[2,0] = yaw # store the first IMU yaw reading as the initial yaw value
+            self.xk[2,0] = -yaw # store the first IMU yaw reading as the initial yaw value
             self.start = True # start the localization
         else:
             # Pre-processing for Update
             # rospy.loginfo("Updating with IMU.")
-            zk = np.array([[yaw]])
-            Rk = np.array([[imu_msg.orientation_covariance[8]]])
+            zk = np.array([[-yaw]])
+            # Rk = np.array([[imu_msg.orientation_covariance[8]]])
+            Rk = np.array([[0.001]]) # covariance of IMU hard-coded
             Hk = np.array([[0,0,1]]) # for robot pose only
             Hk = np.block([Hk,np.zeros((1,self.xk.shape[0]-3))])
             Vk = np.eye(1)
@@ -157,16 +172,19 @@ class TurtlebotLocalization:
             self.xk = xk
             self.Pk = Pk
 
+            # Save current time
+            self.current_time = imu_msg.header.stamp
+
     def encoder_to_displacement(self,wl,wr,Re):
         # set time interval
         # previous time = the later timestamp between the 2 wheels
         ti_1 = max(self.left_wheel_prev_time,self.right_wheel_prev_time)
 
         # current time = now
-        ti = time.time()
+        ti = max(self.left_wheel_time,self.right_wheel_time)
 
         # time step
-        dt = ti - ti_1
+        dt = (ti - ti_1).to_sec()
 
         # convert angular to linear velocity
         vl = wl * self.wheel_radius
@@ -243,7 +261,6 @@ class TurtlebotLocalization:
         # print("Feature observation ranges = ", self.feature_observation_ranges)
         # print("Feature observation points = ", self.feature_observation_points)
         
-        # TODO: Perform feature update on mapped features
         if zf.any():
             # Pre-processing for update
             xk_bar = self.xk
@@ -370,7 +387,7 @@ class TurtlebotLocalization:
         br = tf.TransformBroadcaster()
         br.sendTransform((self.xk[0,0], self.xk[1,0], 0),
                         tf.transformations.quaternion_from_euler(0, 0, self.xk[2,0]),
-                        rospy.Time.now(),
+                        self.current_time,
                         "turtlebot/kobuki/base_footprint",
                         "world_ned")
         
@@ -402,7 +419,7 @@ class TurtlebotLocalization:
 
         odom_msg.child_frame_id = "turtlebot/kobuki/base_footprint"
 
-        odom_msg.header.stamp = rospy.Time.now()
+        odom_msg.header.stamp = self.current_time
 
         self.odom_pub.publish(odom_msg)
 
@@ -415,7 +432,7 @@ class TurtlebotLocalization:
         for i in range(nf):
             m = Marker()
             m.header.frame_id = "world_ned"
-            m.header.stamp = rospy.Time.now()
+            m.header.stamp = self.current_time
             m.ns = "feature"
             m.id = self.feature_states_id[i]
             m.type = Marker.SPHERE
@@ -446,7 +463,7 @@ class TurtlebotLocalization:
     def publish_obs_point(self,obs_point):
         msg = PointStamped()
         msg.header.frame_id = "world_ned"
-        msg.header.stamp = rospy.Time.now()
+        msg.header.stamp = self.current_time
 
         msg.point.x = obs_point[0,0]
         msg.point.y = obs_point[1,0]
@@ -459,7 +476,7 @@ class TurtlebotLocalization:
         for marker in range(len(aruco_ranges)):
             m = Marker()
             m.header.frame_id = "world_ned"
-            m.header.stamp = rospy.Time.now()
+            m.header.stamp = self.current_time
             m.ns = f"aruco_ranges_{marker}"
             m.id = 0
             m.type = Marker.CYLINDER
@@ -492,7 +509,7 @@ class TurtlebotLocalization:
             # show the ranges
             m1 = Marker()
             m1.header.frame_id = "world_ned"
-            m1.header.stamp = rospy.Time.now()
+            m1.header.stamp = self.current_time
             m1.ns = f"observation_{obs}"
             m1.id = 0
             m1.type = Marker.CYLINDER
@@ -516,7 +533,7 @@ class TurtlebotLocalization:
             # show the observation points
             m2 = Marker()
             m2.header.frame_id = "world_ned"
-            m2.header.stamp = rospy.Time.now()
+            m2.header.stamp = self.current_time
             m2.ns = f"observation_{obs}"
             m2.id = 1
             m2.type = Marker.SPHERE
@@ -540,7 +557,7 @@ class TurtlebotLocalization:
         # show the multilateration result
         m3 = Marker()
         m3.header.frame_id = "world_ned"
-        m3.header.stamp = rospy.Time.now()
+        m3.header.stamp = self.current_time
         m3.ns = "result"
         m3.id = 0
         m3.type = Marker.SPHERE
