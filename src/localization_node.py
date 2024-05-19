@@ -16,8 +16,10 @@ import scipy
 
 from filter import *
 from ho_localization_project.msg import ArucoRange # a newly created ROS msg
+from utils.GetEllipse import GetEllipse
 
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import PointStamped, Point
+from std_msgs.msg import ColorRGBA
 
 class TurtlebotLocalization:
     def __init__(self) -> None:
@@ -245,6 +247,7 @@ class TurtlebotLocalization:
         Rf = np.zeros((0,0))
         zf_ids = []
 
+        ## Split observed markers between mapped and unmapped
         for n in range(len(marker_id)): # loop for all markers observed
             id_n = marker_id[n]
             range_n = marker_range[n]
@@ -257,10 +260,8 @@ class TurtlebotLocalization:
             else:                             
                 # store the ranges and observation points for multilateration
                 self.prepare_feature_initialization(id_n,range_n,obs_point)
-
-        # print("Feature observation ranges = ", self.feature_observation_ranges)
-        # print("Feature observation points = ", self.feature_observation_points)
         
+        ## Perform update on mapped features
         if zf.any():
             # Pre-processing for update
             xk_bar = self.xk
@@ -275,7 +276,7 @@ class TurtlebotLocalization:
             self.xk = xk
             self.Pk = Pk
 
-        # Perform state augmentation on unmapped features
+        ## Perform state augmentation on unmapped features
         self.state_augmentation()
 
         # Debugging
@@ -309,7 +310,7 @@ class TurtlebotLocalization:
                     self.feature_states.append([xf,yf])
                     self.xk = np.vstack((self.xk,xfi)) # append to the state vector
                     self.feature_states_id.append(id)
-                    self.Pk = scipy.linalg.block_diag(self.Pk,Pfi) # TODO: confirm this!
+                    self.Pk = scipy.linalg.block_diag(self.Pk,Pfi)
                     
                     # remove it from the list of observations to trilaterate
                     del self.feature_observation_ranges[id]
@@ -343,37 +344,22 @@ class TurtlebotLocalization:
 
         P = np.block([p1,p2,p3,p4])
 
-        print("P = ", P)
-
         # Extract distances
         r = np.array(observation_ranges).reshape((-1,1))
-
-        print("r = ", r)
 
         # Hard-code range uncertainties (?)
         R = np.diag([0.5,0.5,0.5,0.5])
 
-        print("R = ", R)
-
         # Unconstrained least squares multilateration formulation
         d = r * r # Hadamard product
-        print("d = ", d)
         H = np.block([2*P.T, -1*np.ones((P.shape[1],1))])
-        print("H = ", H)
         z = (np.diag(P.T @ P)).reshape((-1,1)) - d
-        print("z = ", z)
         Pxi = 4 * np.diag(r.flatten()) @ R @ np.diag(r.flatten())
-        print("Pxi = ", Pxi)
         W = np.linalg.inv(Pxi)
-        print("W = ", W)
         theta_WLS = np.linalg.inv(H.T @ W @ H) @ H.T @ W @ z
-        print("theta_WLS = ", theta_WLS)
         N = np.block([np.eye(2),np.zeros((2,1))])
-        print("N = ", N)
         xk = N @ theta_WLS
-        print("xk = ", xk)
         Pk = N @ np.linalg.inv(H.T @ W @ H) @ N.T
-        print("Pk = ", Pk)
 
         return xk,Pk
     
@@ -428,30 +414,81 @@ class TurtlebotLocalization:
         nf = int((self.xk.shape[0] - 3)/2) # number of mapped features
 
         markers_list = []
-        # create Marker message for each feature in state
+
+        # Visualize the mean position of feature
+        # create Point for each feature in state
+        mean_m = Marker()
+        mean_m.header.frame_id = 'world_ned'
+        mean_m.header.stamp = self.current_time
+        mean_m.id = 0
+        mean_m.type = Marker.SPHERE_LIST
+        mean_m.ns = 'mean'
+        mean_m.action = Marker.DELETE
+        mean_m.lifetime = rospy.Duration(0)
+
+        mean_m.action = Marker.ADD
+        mean_m.scale.x = 0.1
+        mean_m.scale.y = 0.1
+        mean_m.scale.z = 0.1
+
+        mean_m.pose.orientation.x = 0
+        mean_m.pose.orientation.y = 0
+        mean_m.pose.orientation.z = 0
+        mean_m.pose.orientation.w = 1
+        
+        color_white = ColorRGBA()
+        color_white.r = 1
+        color_white.g = 1
+        color_white.b = 1
+        color_white.a = 1
+        
         for i in range(nf):
-            m = Marker()
-            m.header.frame_id = "world_ned"
-            m.header.stamp = self.current_time
-            m.ns = "feature"
-            m.id = self.feature_states_id[i]
-            m.type = Marker.SPHERE
-            m.action = Marker.ADD
+            p = Point()
+            p.x = self.xk[2*i+3,0]
+            p.y = self.xk[2*i+4,0]
+            p.z = 0.0
+            mean_m.points.append(p)
+            mean_m.colors.append(color_white)
 
-            m.pose.position.x = self.xk[2*i+3,0]
-            m.pose.position.y = self.xk[2*i+4,0]
-            m.pose.position.z = 0.0
+        markers_list.append(mean_m)
 
-            m.scale.x = 0.1
-            m.scale.y = 0.1
-            m.scale.z = 0.1
+        # Visualize covariance
+        for i in range(nf):
+            # Get uncertainty ellipse points
+            f_index = 2*i+3
+            xf = self.xk[f_index:f_index+2,0].reshape((2,1))
+            Pf = self.Pk[f_index:f_index+2,f_index:f_index+2]
+            ellipse_points = GetEllipse(xf,Pf)
 
-            m.color.a = 1.0
-            m.color.r = 1.0
-            m.color.g = 1.0
-            m.color.b = 1.0
+            # Create Marker
+            cov_m = Marker()
+            cov_m.header.frame_id = 'world_ned'
+            cov_m.header.stamp = self.current_time
+            cov_m.id = 0
+            cov_m.type = Marker.LINE_STRIP
+            cov_m.ns = f"cov{i}"
+            cov_m.action = Marker.DELETE
+            cov_m.lifetime = rospy.Duration(0)
 
-            markers_list.append(m)
+            cov_m.action = Marker.ADD
+            cov_m.scale.x = 0.02
+            cov_m.scale.y = 0
+            cov_m.scale.z = 0
+
+            cov_m.pose.orientation.x = 0
+            cov_m.pose.orientation.y = 0
+            cov_m.pose.orientation.z = 0
+            cov_m.pose.orientation.w = 1
+
+            for n in range(ellipse_points.shape[1]):
+                p = Point()
+                p.x = ellipse_points[0,n]
+                p.y = ellipse_points[1,n]
+                p.z = 0.0
+                cov_m.points.append(p)
+                cov_m.colors.append(color_white)
+
+            markers_list.append(cov_m)
 
         # publish MarkerArray
         marker_msg = MarkerArray()
