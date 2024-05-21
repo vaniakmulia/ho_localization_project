@@ -31,7 +31,12 @@ class ArUcoDetector:
         self.aruco_range_list = []
 
         # Subscribers
-        self.image_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/image_color", Image, self.image_callback)
+        # for simulation
+        # self.image_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/image_color", Image, self.image_callback)
+        # self.intrinsics_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/camera_info", CameraInfo, self.intrinsics_callback)
+
+        # for real robot
+        self.image_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/image_raw", Image, self.image_callback)
         self.intrinsics_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/camera_info", CameraInfo, self.intrinsics_callback)
 
         # Publishers
@@ -93,12 +98,15 @@ class ArUcoDetector:
 
     def send_messages(self,event):
         if self.marker_ids is not None:
-            # Send the list of ArUco range
-            range_msg = ArucoRange()
-            range_msg.id = list(self.marker_ids.flatten())
-            range_msg.range = self.aruco_range_list
+            try:
+                # Send the list of ArUco range
+                range_msg = ArucoRange()
+                range_msg.id = list(self.marker_ids.flatten())
+                range_msg.range = self.aruco_range_list
 
-            self.range_pub.publish(range_msg)
+                self.range_pub.publish(range_msg)
+            except rospy.ROSSerializationException as e:
+                rospy.logwarn(e)
 
 
 if __name__=='__main__':

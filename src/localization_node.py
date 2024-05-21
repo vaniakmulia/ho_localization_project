@@ -25,8 +25,8 @@ class TurtlebotLocalization:
     def __init__(self) -> None:
 
         # initialize state vector with the initial robot pose
-        # self.xk = np.zeros((3,1))
-        self.xk = np.array([3.0,-0.78,0.0]).reshape((3,1)) # to be used with hol_circuit2 scenario
+        self.xk = np.zeros((3,1))
+        # self.xk = np.array([3.0,-0.78,0.0]).reshape((3,1)) # to be used with hol_circuit2 scenario
 
         # initialize robot pose covariance
         self.Pk = np.zeros((3,3))
@@ -34,6 +34,13 @@ class TurtlebotLocalization:
         # initialize wheel angular velocities
         self.wl = 0 # left wheel
         self.wr = 0 # right wheel
+
+        # covariances
+        # TODO: tune here!
+        self.cov_encoder = 0.15
+        self.cov_imu = 0.001
+        self.cov_feature_init = 0.5
+        self.cov_feature_update = 0.3
 
         # initialize encoder covariance
         self.left_wheel_cov = 0.0 # left wheel
@@ -99,7 +106,7 @@ class TurtlebotLocalization:
                 left_index = names_list.index("turtlebot/kobuki/wheel_left_joint")
                 # set left wheel
                 self.wl = states_msg.velocity[left_index]
-                self.left_wheel_cov = 0.1 #hard-coded
+                self.left_wheel_cov = self.cov_encoder
                 self.left_wheel_flag = True
                 self.left_wheel_prev_time = self.left_wheel_time
                 self.left_wheel_time = states_msg.header.stamp
@@ -108,7 +115,7 @@ class TurtlebotLocalization:
                 right_index = names_list.index("turtlebot/kobuki/wheel_right_joint")
                 # set right wheel
                 self.wr = states_msg.velocity[right_index]
-                self.right_wheel_cov = 0.1 #hard-coded
+                self.right_wheel_cov = self.cov_encoder
                 self.right_wheel_flag = True
                 self.right_wheel_prev_time = self.right_wheel_time
                 self.right_wheel_time = states_msg.header.stamp
@@ -159,7 +166,7 @@ class TurtlebotLocalization:
             # rospy.loginfo("Updating with IMU.")
             zk = np.array([[-yaw]])
             # Rk = np.array([[imu_msg.orientation_covariance[8]]])
-            Rk = np.array([[0.001]]) # covariance of IMU hard-coded
+            Rk = np.array([[self.cov_imu]]) # covariance of IMU hard-coded
             Hk = np.array([[0,0,1]]) # for robot pose only
             Hk = np.block([Hk,np.zeros((1,self.xk.shape[0]-3))])
             Vk = np.eye(1)
@@ -232,15 +239,11 @@ class TurtlebotLocalization:
         self.publish_obs_point(obs_point)
 
         # Extract observed markers
-        print("Range msg = ",range_msg)
         marker_id = list(range_msg.id)
         marker_range = list(range_msg.range)
 
         # Debugging: publish Aruco ranges to Rviz
         self.publish_aruco_ranges_vis(marker_range,obs_point)
-
-        print("Marker id = ", marker_id)
-        print("Marker range = ", marker_range)
 
         # Initialize observation vector and hypothesis list for feature update
         zf = np.zeros((0,1))
@@ -255,7 +258,7 @@ class TurtlebotLocalization:
             if id_n in self.feature_states_id: # if marker is already in the state vector
                 # store marker for update
                 zf = np.vstack((zf,np.array([[range_n]])))
-                Rf = scipy.linalg.block_diag(Rf,np.array([[0.5]])) # range measurement uncertainty hard-coded
+                Rf = scipy.linalg.block_diag(Rf,np.array([[self.cov_feature_update]])) # range measurement uncertainty hard-coded
                 zf_ids.append(id_n)
             else:                             
                 # store the ranges and observation points for multilateration
@@ -316,9 +319,6 @@ class TurtlebotLocalization:
                     del self.feature_observation_ranges[id]
                     del self.feature_observation_points[id]
 
-                    # debugging
-                    print("xk = ", self.xk)
-
                 else: # if multilateration fails
                     print("Multilateration failed.")
                     # remove the first observation, and let the robot makes a new observation later
@@ -328,7 +328,7 @@ class TurtlebotLocalization:
 
     def multilateration(self,observation_ranges,observation_points):
         # don't perform multilateration if the distance between observation points is less than a threshold
-        dist_threshold = 0.2
+        dist_threshold = 0.1
         dist1 = np.linalg.norm(np.subtract(observation_points[0],observation_points[1]))
         dist2 = np.linalg.norm(np.subtract(observation_points[1],observation_points[2]))
         dist3 = np.linalg.norm(np.subtract(observation_points[2],observation_points[3]))
@@ -348,7 +348,8 @@ class TurtlebotLocalization:
         r = np.array(observation_ranges).reshape((-1,1))
 
         # Hard-code range uncertainties (?)
-        R = np.diag([0.5,0.5,0.5,0.5])
+        # R = np.diag([self.cov_feature_init,self.cov_feature_init,self.cov_feature_init,self.cov_feature_init])
+        R = np.eye(4) * self.cov_feature_init
 
         # Unconstrained least squares multilateration formulation
         d = r * r # Hadamard product
@@ -565,6 +566,8 @@ class TurtlebotLocalization:
             m1.color.g = 0.0
             m1.color.b = 0.25*(4-obs)
 
+            m1.lifetime = rospy.Duration(3.0)
+
             obs_list.append(m1)
 
             # show the observation points
@@ -589,6 +592,8 @@ class TurtlebotLocalization:
             m2.color.g = 0.0
             m2.color.b = 0.25*(4-obs)
 
+            m2.lifetime = rospy.Duration(3.0)
+
             obs_list.append(m2)
 
         # show the multilateration result
@@ -612,6 +617,8 @@ class TurtlebotLocalization:
         m3.color.r = 0.0
         m3.color.g = 1.0
         m3.color.b = 0.0
+
+        m3.lifetime = rospy.Duration(3.0)
 
         obs_list.append(m3)
 
