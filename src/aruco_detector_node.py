@@ -11,9 +11,9 @@
 
 import rospy
 import numpy as np
-from cv_bridge import CvBridge
 import cv2
-from sensor_msgs.msg import Image, CameraInfo
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image, CompressedImage, CameraInfo
 
 from ho_localization_project.msg import ArucoRange # a newly created ROS msg
 
@@ -30,13 +30,16 @@ class ArUcoDetector:
         # Initialize ArUco range list
         self.aruco_range_list = []
 
+        # Initialize marker ID list
+        self.marker_ids = None
+
         # Subscribers
         # for simulation
         # self.image_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/image_color", Image, self.image_callback)
         # self.intrinsics_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/camera_info", CameraInfo, self.intrinsics_callback)
 
         # for real robot
-        self.image_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/image_raw", Image, self.image_callback)
+        self.image_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/image_raw/compressed", CompressedImage, self.image_callback)
         self.intrinsics_sub = rospy.Subscriber("/turtlebot/kobuki/realsense/color/camera_info", CameraInfo, self.intrinsics_callback)
 
         # Publishers
@@ -47,9 +50,9 @@ class ArUcoDetector:
 
     def image_callback(self,image_msg):
         # Convert Image message into image
-        self.encoding = image_msg.encoding
+        # self.encoding = image_msg.encoding
         bridge = CvBridge()
-        self.image = bridge.imgmsg_to_cv2(image_msg, self.encoding)
+        self.image = bridge.compressed_imgmsg_to_cv2(image_msg)
 
         marker_corners, self.marker_ids = self.detect_aruco()
 

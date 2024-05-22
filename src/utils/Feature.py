@@ -1,7 +1,6 @@
-from conversions import *
+# from conversions import *
 from utils.Pose import *
 import numpy as np
-from conversions import *
 
 class Feature:
     """

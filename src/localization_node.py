@@ -37,7 +37,7 @@ class TurtlebotLocalization:
 
         # covariances
         # TODO: tune here!
-        self.cov_encoder = 0.15
+        self.cov_encoder = 0.1
         self.cov_imu = 0.001
         self.cov_feature_init = 0.5
         self.cov_feature_update = 0.3
@@ -151,16 +151,15 @@ class TurtlebotLocalization:
                                                             imu_msg.orientation.z,
                                                             imu_msg.orientation.w])
         
-        # store also initial time
-        self.left_wheel_time = imu_msg.header.stamp
-        self.right_wheel_time = imu_msg.header.stamp
-        self.current_time = imu_msg.header.stamp
-        
         # Start the localization when the node receives the first IMU reading
         # NOTE: remove the negative sign for yaw if testing in simulation
         if not self.start:
             self.xk[2,0] = -yaw # store the first IMU yaw reading as the initial yaw value
             self.start = True # start the localization
+            # store also initial time
+            self.left_wheel_time = imu_msg.header.stamp
+            self.right_wheel_time = imu_msg.header.stamp
+            self.current_time = imu_msg.header.stamp
         else:
             # Pre-processing for Update
             # rospy.loginfo("Updating with IMU.")
@@ -490,6 +489,37 @@ class TurtlebotLocalization:
                 cov_m.colors.append(color_white)
 
             markers_list.append(cov_m)
+
+        # Label the markers
+        for i in range(nf):
+            label_m = Marker()
+            label_m.header.frame_id = 'world_ned'
+            label_m.header.stamp = self.current_time
+            label_m.id = 0
+            label_m.type = Marker.TEXT_VIEW_FACING
+            label_m.ns = f"label{i}"
+            label_m.action = Marker.DELETE
+            label_m.lifetime = rospy.Duration(0)
+
+            label_m.action = Marker.ADD
+            label_m.scale.z = 0.1
+
+            label_m.pose.position.x = self.xk[2*i+3,0] + 0.1
+            label_m.pose.position.y = self.xk[2*i+4,0] + 0.1
+            label_m.pose.position.z = 0.0
+            label_m.pose.orientation.x = 0.0
+            label_m.pose.orientation.y = 0.0
+            label_m.pose.orientation.z = 0.0
+            label_m.pose.orientation.w = 1.0
+
+            label_m.text = "id = " + str(self.feature_states_id[i])
+
+            label_m.color.a = 1.0
+            label_m.color.r = 1.0
+            label_m.color.g = 1.0
+            label_m.color.b = 0.0
+
+            markers_list.append(label_m)
 
         # publish MarkerArray
         marker_msg = MarkerArray()
