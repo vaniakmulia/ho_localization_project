@@ -14,7 +14,7 @@ import tf
 
 import scipy
 
-from filter import *
+from utils.filter import *
 from ho_localization_project.msg import ArucoRange # a newly created ROS msg
 from utils.GetEllipse import GetEllipse
 
@@ -87,9 +87,6 @@ class TurtlebotLocalization:
         # Publishers
         self.odom_pub = rospy.Publisher("/odom",Odometry, queue_size=1)
         self.marker_pub = rospy.Publisher("~aruco_marker", MarkerArray, queue_size=1)
-
-        self.obs_point_pub = rospy.Publisher("/obs_point_vis", PointStamped, queue_size=1)
-        self.aruco_ranges_pub = rospy.Publisher("/aruco_range_vis", MarkerArray, queue_size=1)
         self.multilateration_pub = rospy.Publisher("/trilateration_vis", MarkerArray, queue_size=1)
 
         # Timer
@@ -122,7 +119,6 @@ class TurtlebotLocalization:
             
             if self.right_wheel_flag and self.left_wheel_flag:
                 # Pre-processing for Prediction
-                # rospy.loginfo("Performing prediction.")
                 xk_1 = self.xk
                 Pk_1 = self.Pk
                 self.Re = np.diag([self.left_wheel_cov,self.right_wheel_cov])
@@ -162,7 +158,6 @@ class TurtlebotLocalization:
             self.current_time = imu_msg.header.stamp
         else:
             # Pre-processing for Update
-            # rospy.loginfo("Updating with IMU.")
             zk = np.array([[-yaw]])
             # Rk = np.array([[imu_msg.orientation_covariance[8]]])
             Rk = np.array([[self.cov_imu]]) # covariance of IMU hard-coded
@@ -282,7 +277,6 @@ class TurtlebotLocalization:
         self.state_augmentation()
 
         # Debugging
-        # print("Features in states = ", self.feature_states)
         print("Features in states id = ", self.feature_states_id)
 
 
@@ -346,8 +340,7 @@ class TurtlebotLocalization:
         # Extract distances
         r = np.array(observation_ranges).reshape((-1,1))
 
-        # Hard-code range uncertainties (?)
-        # R = np.diag([self.cov_feature_init,self.cov_feature_init,self.cov_feature_init,self.cov_feature_init])
+        # Hard-code range uncertainties
         R = np.eye(4) * self.cov_feature_init
 
         # Unconstrained least squares multilateration formulation
@@ -525,50 +518,6 @@ class TurtlebotLocalization:
         marker_msg = MarkerArray()
         marker_msg.markers = markers_list
         self.marker_pub.publish(marker_msg)
-
-    ## DEBUGGING FUNCTIONS
-
-    def publish_obs_point(self,obs_point):
-        msg = PointStamped()
-        msg.header.frame_id = "world_ned"
-        msg.header.stamp = self.current_time
-
-        msg.point.x = obs_point[0,0]
-        msg.point.y = obs_point[1,0]
-        msg.point.z = -0.0945
-        self.obs_point_pub.publish(msg)
-
-    def publish_aruco_ranges_vis(self,aruco_ranges,obs_point):
-        ranges_list = []
-        # create Marker message for each feature in state
-        for marker in range(len(aruco_ranges)):
-            m = Marker()
-            m.header.frame_id = "world_ned"
-            m.header.stamp = self.current_time
-            m.ns = f"aruco_ranges_{marker}"
-            m.id = 0
-            m.type = Marker.CYLINDER
-            m.action = Marker.ADD
-
-            m.pose.position.x = obs_point[0,0]
-            m.pose.position.y = obs_point[1,0]
-            m.pose.position.z = 0.0
-
-            m.scale.x = 2*aruco_ranges[marker]
-            m.scale.y = 2*aruco_ranges[marker]
-            m.scale.z = 0.05
-
-            m.color.a = 0.5
-            m.color.r = 0.0
-            m.color.g = 1.0
-            m.color.b = 0.0
-
-            ranges_list.append(m)
-
-        # publish MarkerArray
-        range_vis_msg = MarkerArray()
-        range_vis_msg.markers = ranges_list
-        self.aruco_ranges_pub.publish(range_vis_msg)
 
     def publish_multilateration_ranges(self,ranges,obs_points,xf,yf):
         obs_list = []
