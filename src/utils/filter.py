@@ -3,10 +3,9 @@ import numpy as np
 from utils.Pose import Pose3D
 
 '''
-    Pure Python implementation of the Extended Kalman Filter (EKF) for localization,
-    using wheel encoders for Prediction, and IMU magnetometer yaw reading for Update.
-
-    Note: Most functions are copied from PR lab.
+    Pure Python implementation of the Feature-based Extended Kalman Filter (FEKF) for SLAM,
+    using wheel encoders for Prediction, IMU magnetometer yaw reading for Measurement Update,
+    and range-only ArUco observation for Feature Update.
 '''
 
 def wrap_angle(angle):
@@ -74,13 +73,6 @@ class EKF:
     
     def UpdateFeature(self,xk_bar,Pk_bar,zk,Rk,Hk,Vk,H):
 
-        # print("xk_bar = ", xk_bar)
-        # print("Pk_bar = ", Pk_bar)
-        # print("zk = ", zk)
-        # print("Rk = ", Rk)
-        # print("Hk = ", Hk)
-        # print("Vk = ", Vk)
-
         Kk = Pk_bar @ Hk.T @ np.linalg.inv(Hk@Pk_bar@Hk.T + Vk@Rk@Vk.T)
         innovation = zk-self.hf(xk_bar,H)
         self.xk = xk_bar + Kk@(innovation)
@@ -93,26 +85,42 @@ class EKF:
         return self.xk,self.Pk
 
     def f(self,xk_1,uk):
+        '''
+            Motion model.
+        '''
         xk_bar = Pose3D(xk_1).oplus(uk)
 
         return xk_bar
 
     def Jfx(self,xk_1,uk):
+        '''
+            Jacobian of the motion model w.r.t. robot pose.
+        '''
         J = Pose3D(xk_1).J_1oplus(uk)
 
         return J
 
     def Jfw(self,xk_1):
+        '''
+            Jacobian of the motion model w.r.t. input noise.
+        '''
         J = Pose3D(xk_1).J_2oplus()
 
         return J
     
-    def hm(self, xk):  # return the expected observations
+    def hm(self, xk):
+        '''
+            Observation model for IMU yaw reading.
+        '''
         z = xk[2]
 
         return z  
     
     def hf(self,xk,H):
+        '''
+            Observation model for all feature observations.
+            Built by stacking the observation model for each feature in the H list (hypothesis).
+        '''
         # initialize vector of expected feature observation
         h = np.zeros((0, 1))  # empty vector
         nf = len(H) # number of feature
@@ -126,6 +134,9 @@ class EKF:
         return h
 
     def hfi(self,xk,i):
+        '''
+            Observation model for 1 feature observation (i.e. feature i).
+        '''
         # extract robot position
         xr = xk[0,0]
         yr = xk[1,0]
@@ -137,6 +148,10 @@ class EKF:
         return np.sqrt((xfi-xr)**2 + (yfi-yr)**2)
     
     def Jhfx(self,xk,H):
+        '''
+            Jacobian of the observation model for all feature observations w.r.t. robot pose.
+            Built by stacking the Jacobian for each feature observation in H list (hypothesis).
+        '''
         # initialize Jacobian
         J = np.zeros((0,xk.shape[0]))
         nf = len(H) # number of feature
@@ -150,6 +165,9 @@ class EKF:
         return J
     
     def Jhfix(self,xk,i):
+        '''
+            Jacobian of the observation model for 1 feature (i.e. feature i) w.r.t. robot pose.
+        '''
         # extract robot position
         xr = xk[0,0]
         yr = xk[1,0]

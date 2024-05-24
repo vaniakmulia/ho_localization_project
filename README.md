@@ -1,4 +1,4 @@
-# Hands-On Localization Project
+# Hands-On Localization Project: FEKFSLAM with ArUco Range Observation
 
 This package is made for Hands-On Localization project.
 
@@ -16,45 +16,13 @@ Furthermore, this package also contains a custom ROS message, `ArucoRange`, whic
 
 ## Running the Package
 
-### Basic Functionalities: Localization and Controller
-
-To run the package with Stonefish simulator, first run the simulator:
+To run the whole program with the turtlebot, first connect to the turtlebot and run `kobuki_mobile_base.launch` and `kobuki_sensors.launch` in the `turtlebot` package through ssh. Then, run the following command in the terminal:
 
 ```bash
-roslaunch turtlebot_simulation turtlebot_basic.launch 
+roslaunch ho_localization_project launch_project.launch
 ```
 
-> NOTE: You can also run other launch files in the `turtlebot_simulation` package to launch a different environment.
-
-Then, there are several options:
-
-To run only the localization node, run this command in another terminal:
-
-```bash
-rosrun ho_localization_project localization_node.py
-```
-
-And to test the localization, you can publish wheel velocities to the ROS topic `/turtlebot/kobuki/commands/wheel_velocities`. This topic accepts `Float64MultiArray` message, with a format = [vl,vr]. Another method to control the robot is to run the controller node:
-
-```bash
-rosrun ho_localization_project controller_node.py
-```
-
-This node allows for controlling the turtlebot using `Twist` message, and thus the robot can be controlled by teleop or with graphical tools such as _rqt_robot_steering_.
-
-Alternatively, to run the localization node and controller node together, you can run the launch file included in this package. To do so, run the following command in another terminal:
-
-```bash
-roslaunch ho_localization_project localization_controller.launch
-```
-
-### ArUco Detector
-
-To detect ArUco markers, run the `aruco_detector_node.py` with the command line below.
-
-```bash
-rosrun ho_localization_project aruco_detector_node.py
-```
+This launch file will run all nodes in this package.
 
 ## Extra: Teleop
 
@@ -71,7 +39,3 @@ sudo apt-get install ros-noetic-teleop-twist-keyboard
 ```
 
 For more information, refer to this [link](https://wiki.ros.org/teleop_twist_keyboard).
-
-<sup>
-Last updated by Vania - 28/04/2024
-</sup>

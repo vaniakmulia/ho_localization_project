@@ -276,9 +276,6 @@ class TurtlebotLocalization:
         ## Perform state augmentation on unmapped features
         self.state_augmentation()
 
-        # Debugging
-        print("Features in states id = ", self.feature_states_id)
-
 
     def prepare_feature_initialization(self, id, marker_range, obs_point):
         # store the ranges and observation points for multilateration

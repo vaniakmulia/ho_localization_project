@@ -1,4 +1,3 @@
-import utils.Feature as f
 import numpy as np
 from math import cos, sin
 
@@ -88,68 +87,12 @@ class Pose(np.ndarray):
 
         pass
 
-    def boxplus(NxB, BxF):
-        """
-        Given a Pose object *NxB* (the self object) and a Feature object *BxF*, it returns the Feature object *NxF*
-        providing the same feature but now expresend in the N-Frame.
-
-        :param BxF: Feature object expressed in the B-Frame
-        :return: NxF Feature object expressed in the N-Frame
-        """
-        assert isinstance(BxF,f.Feature), "BxF is not a Feature"
-        assert isinstance(NxB,Pose), "NxB is not a Pose"
-
-        return BxF.boxplus(NxB)
-
-    def J_1boxplus(NxB, BxF):
-        """
-        Jacobian of the pose-feature compounding operation (eq. :eq:`eq-boxplus`) with respect to the robot pose:
-
-        .. math::
-            J_{1\\boxplus}=\\frac{\\partial  ^Nx_B \\boxplus ^Bx_F}{\\partial ^Nx_B}
-            :label: eq-J1boxplus
-
-        :param BxF: Feature object expressed in the B-Frame
-        :return: :math:`J_{1\\boxplus}` Jacobian of the feature compounding operation with respect to the robot pose (eq. :eq:`eq-J1boxplus`)
-        """
-        assert isinstance(BxF,f.Feature), "BxF is not a Feature"
-        assert isinstance(NxB,Pose), "NxB is not a Pose"
-        return BxF.J_1boxplus(NxB)
-
-    def J_2boxplus(NxB, BxF):
-        """
-        Jacobian of the pose-feature compounding operation (eq. :eq:`eq-boxplus`) with respect to the feature:
-
-        .. math::
-            J_{2\\boxplus}=\\frac{\\partial  ^Nx_B \\boxplus ^Bx_F}{\\partial ^Bx_F}
-            :label: eq-J2boxplus
-
-        :param BxF: Feature object expressed in the B-Frame
-        :return: :math:`J_{2\\boxplus}` Jacobian of the feature compounding operation with respect to the feature (eq. :eq:`eq-J2boxplus`)
-        """
-        assert isinstance(BxF,f.Feature), "BxF is not a Feature"
-        assert isinstance(NxB,Pose), "NxB is not a Pose"
-        return BxF.J_2boxplus(NxB)
 
 class Pose3D(Pose):
     """
     Definition of a robot pose in 3 DOF (x, y, yaw). The class inherits from a ndarray.
     This class extends the ndarray with the :math:`oplus` and :math:`ominus` operators and the corresponding Jacobians.
     """
-    # def __new__(cls, input_array):
-    #     """
-    #     Constructor of the class. It is called when the class is instantiated. It is required to extend the ndarray numpy class.
-    #
-    #     :param input_array: array used to initialize the class
-    #     :returns: the instance of a Pose3D class object
-    #     """
-    #     assert input_array.shape == (3, 1), "mean must be a 3x1 vector"
-    #
-    #     # Input array is an already formed ndarray instance
-    #     # We first cast to be our class type
-    #     obj = np.asarray(input_array).view(cls)
-    #     # Finally, we must return the newly created object:
-    #     return obj
 
     def __new__(cls, input_array=np.array([[0.0, 0.0, 0.0]]).T):
         """
@@ -190,7 +133,6 @@ class Pose3D(Pose):
         :param BxC: C-Frame pose expressed in B-Frame coordinates
         :returns: C-Frame pose expressed in A-Frame coordinates
         """
-        # TODO: To be completed by the student
         
         # define AxC
         AxC = np.empty((3,1))
@@ -220,7 +162,6 @@ class Pose3D(Pose):
         :param BxC: 2nd pose
         :returns: Evaluation of the :math:`J_{1\\oplus}` Jacobian of the pose compounding operation with respect to the first pose (eq. :eq:`eq-J1oplus3dof`)
         """
-        # TODO: To be completed by the student
 
         J1 = np.array([[1,0,-BxC[0,0]*sin(AxB[2,0])-BxC[1,0]*cos(AxB[2,0])],
                        [0,1,BxC[0,0]*cos(AxB[2,0])-BxC[1,0]*sin(AxB[2,0])],
@@ -245,7 +186,6 @@ class Pose3D(Pose):
 
         :returns: Evaluation of the :math:`J_{2\\oplus}` Jacobian of the pose compounding operation with respect to the second pose (eq. :eq:`eq-J2oplus3dof`)
         """
-        # TODO: To be completed by the student
 
         J2 = np.array([[cos(AxB[2,0]), -sin(AxB[2,0]), 0],
                        [sin(AxB[2,0]), cos(AxB[2,0]), 0],
@@ -268,8 +208,6 @@ class Pose3D(Pose):
 
         :returns: A-Frame pose expressed in B-Frame coordinates (eq. :eq:`eq-ominus3dof`)
         """
-        # TODO: To be completed by the student
-
         # define BxA
         BxA = np.empty((3,1))
 
@@ -297,15 +235,6 @@ class Pose3D(Pose):
 
         :returns: Evaluation of the :math:`J_{\\ominus}` Jacobian of the inverse pose compounding operation with respect to the pose (eq. :eq:`eq-Jominus3dof`)
         """
-        # TODO: To be completed by the student
-
-        # # define an empty matrix
-        # J = np.empty((3,3))
-
-        # # fill in the elements
-        # J[0,:] = [-cos(AxB[2]), -sin(AxB[2]), AxB[0]*sin(AxB[2])-AxB[1]*cos(AxB[2])]
-        # J[1,:] = [sin(AxB[2]), -cos(AxB[2]), AxB[0]*cos(AxB[2])+AxB[1]*sin(AxB[2])]
-        # J[2,:] = [0,0,-1]
 
         J = np.array([[-cos(AxB[2,0]), -sin(AxB[2,0]), AxB[0,0]*sin(AxB[2,0])-AxB[1,0]*cos(AxB[2,0])],
                       [sin(AxB[2,0]), -cos(AxB[2,0]), AxB[0,0]*cos(AxB[2,0])+AxB[1,0]*sin(AxB[2,0])],
