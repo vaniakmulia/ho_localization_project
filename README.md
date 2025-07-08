@@ -2,6 +2,10 @@
 
 This package is made for Hands-On Localization project.
 
+## Overview of Project
+
+This project focuses on building a SLAM system for the Kobuki Turtlebot using EKF, integrating data from wheel encoders, IMU, and ArUco marker-based range observations to estimate the position and orientation of the Turtlebot. Wheel encoder readings are used to predict the pose of the turtlebot by dead-reckoning. Meanwhile, the orientation readings from IMU provide updates for the estimated pose of the turtlebot, improving the estimation. Furthermore, the algorithm incorporates feature-based updates from ArUco range observations (i.e., distance towards the observed ArUco markers), provided by an RGB camera (RealSense).
+
 ## Contents
 
 This package contains:
@@ -39,3 +43,9 @@ sudo apt-get install ros-noetic-teleop-twist-keyboard
 ```
 
 For more information, refer to this [link](https://wiki.ros.org/teleop_twist_keyboard).
+
+## Additional Documentation
+
+The full report for this project can be found in [this link](https://drive.google.com/file/d/1Uq5TW2t79Qe-zPK_4U3bIB_kH5mAA2v_/view?usp=sharing).
+
+A demo video of this project can be found in [this link](https://drive.google.com/file/d/1PYfLI1RPYdnKquDs4l_yUMtAEI38EcoM/view?usp=sharing).
